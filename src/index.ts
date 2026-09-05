@@ -3,7 +3,7 @@
  * @1flux/bridge — ponte stdio ↔ WebSocket local.
  *
  * Lançado por um cliente MCP (Claude Code) via stdio. Abre um servidor
- * WebSocket em 127.0.0.1 e espera que o 1flux aberto no browser se ligue a
+ * WebSocket em 127.0.0.1 e espera que o 1fluxo aberto no browser se ligue a
  * ele com um token de emparelhamento. A partir daí é um cano: cada linha
  * JSON-RPC do stdin segue para o tab; cada mensagem do tab sai no stdout.
  *
@@ -14,7 +14,7 @@
  *  - não persiste nada nem escreve conteúdo em logs (o stderr só tem eventos
  *    de ligação, nunca pedidos ou respostas).
  *
- * Zero-knowledge é face ao 1flux: a decifragem acontece no tab, com a sessão
+ * Zero-knowledge é face ao 1fluxo: a decifragem acontece no tab, com a sessão
  * e a chave que já lá estão. Este processo vê o plaintext a passar, mas corre
  * na máquina do utilizador, ao lado do cliente MCP que o vai receber de
  * qualquer maneira.
@@ -73,7 +73,7 @@ function usage(): string {
     "Uso: 1flux-bridge [--port N] [--app-url URL] [--origin URL]...",
     "",
     `  --port N        porta do WebSocket local (defeito ${DEFAULT_PORT}; se ocupada escolhe outra)`,
-    `  --app-url URL   onde o 1flux está a correr (defeito ${DEFAULT_APP_URL})`,
+    `  --app-url URL   onde o 1fluxo está a correr (defeito ${DEFAULT_APP_URL})`,
     "  --origin URL    origem adicional autorizada a emparelhar (repetível)",
     "",
     "Lançado por um cliente MCP via stdio, p. ex.:",
@@ -154,7 +154,7 @@ function replyError(id: JsonRpcId, code: number, message: string): void {
 }
 
 function noTabMessage(): string {
-  return `O 1flux não está aberto no browser. Abre ${pairUrl} para ligar.`;
+  return `O 1fluxo não está aberto no browser. Abre ${pairUrl} para ligar.`;
 }
 
 function tokenMatches(candidate: unknown): boolean {
@@ -179,10 +179,10 @@ function localInitialize(msg: JsonRpcMessage & { id: JsonRpcId }): object {
     result: {
       protocolVersion,
       capabilities: { tools: { listChanged: true } },
-      serverInfo: { name: "1flux", version: VERSION },
+      serverInfo: { name: "1fluxo", version: VERSION },
       instructions:
-        "As tools do 1flux só ficam disponíveis depois de o utilizador abrir o " +
-        `1flux no browser e autorizar a ligação em ${pairUrl} — se uma tool falhar ` +
+        "As tools do 1fluxo só ficam disponíveis depois de o utilizador abrir o " +
+        `1fluxo no browser e autorizar a ligação em ${pairUrl} — se uma tool falhar ` +
         "com esse aviso, pede-lhe que abra essa página.",
     },
   };
@@ -252,7 +252,7 @@ function onTabMessage(raw: string): void {
 
 function attachTab(ws: WebSocket): void {
   tab = ws;
-  log("Tab do 1flux ligado.");
+  log("Tab do 1fluxo ligado.");
   ws.send(JSON.stringify({ type: "paired", bridge: VERSION }));
   ws.on("message", (data) => onTabMessage(data.toString()));
   ws.on("close", () => detachTab(ws));
@@ -272,13 +272,13 @@ function attachTab(ws: WebSocket): void {
 function detachTab(ws: WebSocket): void {
   if (tab !== ws) return;
   tab = null;
-  log("Tab do 1flux desligado.");
+  log("Tab do 1fluxo desligado.");
   // Quem ficou à espera de resposta não pode ficar pendurado.
   for (const { id } of pending.values()) {
     replyError(
       id,
       ERR_NO_TAB,
-      `O 1flux fechou a ligação no browser antes de responder. Abre ${pairUrl} para voltar a ligar.`
+      `O 1fluxo fechou a ligação no browser antes de responder. Abre ${pairUrl} para voltar a ligar.`
     );
   }
   pending.clear();
@@ -348,7 +348,7 @@ async function main(): Promise<void> {
   wss.on("error", (err) => log(`Erro no servidor WebSocket: ${err.message}`));
 
   log(`v${VERSION} à escuta em ws://127.0.0.1:${port}`);
-  log("Abre no browser, com a sessão do 1flux desbloqueada:");
+  log("Abre no browser, com a sessão do 1fluxo desbloqueada:");
   log(`  ${pairUrl}`);
 
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
