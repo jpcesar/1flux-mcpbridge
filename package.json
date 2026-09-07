@@ -2,7 +2,7 @@
   "name": "@1flux/bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Ponte stdio ↔ WebSocket local que liga um cliente MCP (Claude Code) ao 1flux aberto no browser. Não interpreta tools nem vê dados.",
+  "description": "Ponte stdio ↔ WebSocket local que liga um cliente MCP (Claude Code) ao 1fluxo aberto no browser. Não interpreta tools nem vê dados.",
   "type": "module",
   "bin": {
     "1flux-bridge": "dist/index.js"

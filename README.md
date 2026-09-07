@@ -1,6 +1,6 @@
 # @1flux/bridge
 
-Ponte local `stdio ↔ WebSocket` que liga um cliente MCP (Claude Code) ao 1flux
+Ponte local `stdio ↔ WebSocket` que liga um cliente MCP (Claude Code) ao 1fluxo
 aberto no browser.
 
 O processo é burro de propósito: não interpreta tools, não fala com a rede
@@ -13,7 +13,7 @@ decifragem, tools — vive no tab do web app, na página `/connect`.
 2. O bridge abre `ws://127.0.0.1:<porta>` (17337 por defeito; se estiver
    ocupada escolhe outra), gera um token de emparelhamento e imprime no
    stderr a URL `…/connect?port=<porta>&token=<token>`.
-3. O utilizador abre essa URL com a sessão do 1flux desbloqueada e carrega em
+3. O utilizador abre essa URL com a sessão do 1fluxo desbloqueada e carrega em
    "Permitir". O tab liga-se ao bridge, envia o token, e passa a ser o servidor
    MCP.
 4. A partir daí cada linha JSON-RPC do stdin vai para o tab e cada resposta do
@@ -39,7 +39,7 @@ cd packages/bridge && npm install && npm run build
 claude mcp add 1flux -- node /caminho/para/1flux-app/packages/bridge/dist/index.js --app-url http://localhost:3000
 ```
 
-Depois, no Claude Code, a primeira pergunta sobre o 1flux devolve a URL de
+Depois, no Claude Code, a primeira pergunta sobre o 1fluxo devolve a URL de
 emparelhamento (ou lê-se no stderr do servidor MCP). Abre-a, autoriza, e
 pergunta de novo.
 
@@ -48,7 +48,7 @@ pergunta de novo.
 | Flag | Defeito | Para quê |
 | --- | --- | --- |
 | `--port N` | `17337` | porta do WebSocket local; ocupada → escolhe outra |
-| `--app-url URL` | `http://localhost:3000` | onde o 1flux está a correr (entra na URL de emparelhamento e na lista de origens) |
+| `--app-url URL` | `http://localhost:3000` | onde o 1fluxo está a correr (entra na URL de emparelhamento e na lista de origens) |
 | `--origin URL` | — | origem adicional autorizada a emparelhar (repetível) |
 
 Origens autorizadas por defeito: as do 1fluxo em produção. A origem de `--app-url`
