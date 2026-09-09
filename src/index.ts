@@ -29,7 +29,7 @@
  * erro JSON-RPC legível — nunca fica pendurado.
  */
 
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createInterface } from "node:readline";
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -116,7 +116,15 @@ const allowedOrigins = new Set<string>([
   new URL(args.appUrl).origin,
   ...args.origins,
 ]);
-const token = randomBytes(32).toString("base64url");
+let token = randomBytes(32).toString("base64url");
+/** O token serve um emparelhamento; depois disso só um token novo entra
+ *. Renova-se quando o tab se desliga. */
+let tokenUsed = false;
+let pairPort = 0;
+/** Ligações ainda por emparelhar; sem tecto qualquer processo local enchia
+ *  a fila. */
+let pendingConnections = 0;
+const MAX_PENDING = 3;
 
 let tab: WebSocket | null = null;
 /** O cliente já completou o handshake MCP — só depois disso se pode mandar
@@ -157,7 +165,20 @@ function noTabMessage(): string {
   return `O 1fluxo não está aberto no browser. Abre ${pairUrl} para ligar.`;
 }
 
+function rotateToken(): void {
+  token = randomBytes(32).toString("base64url");
+  tokenUsed = false;
+  pairUrl = `${args.appUrl}/connect?port=${pairPort}&token=${token}`;
+}
+
+/** Prova de que quem responde "paired" conhece o token: HMAC do nonce que o
+ *  tab escolheu. O tab verifica antes de confiar. */
+function pairingProof(nonce: string): string {
+  return createHmac("sha256", token).update(nonce).digest("base64url");
+}
+
 function tokenMatches(candidate: unknown): boolean {
+  if (tokenUsed) return false;
   if (typeof candidate !== "string") return false;
   const a = Buffer.from(candidate, "utf8");
   const b = Buffer.from(token, "utf8");
@@ -250,10 +271,11 @@ function onTabMessage(raw: string): void {
   writeOut(msg);
 }
 
-function attachTab(ws: WebSocket): void {
+function attachTab(ws: WebSocket, nonce: string): void {
   tab = ws;
+  tokenUsed = true;
   log("Tab do 1fluxo ligado.");
-  ws.send(JSON.stringify({ type: "paired", bridge: VERSION }));
+  ws.send(JSON.stringify({ type: "paired", bridge: VERSION, proof: pairingProof(nonce) }));
   ws.on("message", (data) => onTabMessage(data.toString()));
   ws.on("close", () => detachTab(ws));
   ws.on("error", () => detachTab(ws));
@@ -282,6 +304,10 @@ function detachTab(ws: WebSocket): void {
     );
   }
   pending.clear();
+  // O token que emparelhou este tab morre com ele; a URL nova vai para o log.
+  rotateToken();
+  log("Token de emparelhamento renovado. Para voltar a ligar:");
+  log(`  ${pairUrl}`);
 }
 
 function onConnection(ws: WebSocket, origin: string | undefined): void {
@@ -295,19 +321,40 @@ function onConnection(ws: WebSocket, origin: string | undefined): void {
     ws.close(4009, "already paired");
     return;
   }
+  if (pendingConnections >= MAX_PENDING) {
+    log("Ligação recusada: demasiados emparelhamentos pendentes.");
+    ws.close(4029, "too many pending");
+    return;
+  }
+  pendingConnections += 1;
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    pendingConnections -= 1;
+  };
   const timer = setTimeout(() => {
     log("Emparelhamento expirou sem token.");
+    settle();
     ws.close(4008, "pairing timeout");
+    // Sem esperar pelo handshake de fecho: um socket mudo ficava a ocupar vaga.
+    setTimeout(() => ws.terminate(), 1_000).unref();
   }, PAIR_TIMEOUT_MS);
+  ws.once("close", () => {
+    clearTimeout(timer);
+    settle();
+  });
   ws.once("message", (data) => {
     clearTimeout(timer);
-    let hello: { type?: unknown; token?: unknown } | null = null;
+    settle();
+    let hello: { type?: unknown; token?: unknown; nonce?: unknown } | null = null;
     try {
-      hello = JSON.parse(data.toString()) as { type?: unknown; token?: unknown };
+      hello = JSON.parse(data.toString()) as { type?: unknown; token?: unknown; nonce?: unknown };
     } catch {
       hello = null;
     }
-    if (!hello || hello.type !== "pair" || !tokenMatches(hello.token)) {
+    const nonce = typeof hello?.nonce === "string" && hello.nonce.length >= 16 && hello.nonce.length <= 128 ? hello.nonce : null;
+    if (!hello || hello.type !== "pair" || !nonce || !tokenMatches(hello.token)) {
       log("Ligação recusada: token de emparelhamento inválido.");
       ws.close(4001, "bad token");
       return;
@@ -317,7 +364,7 @@ function onConnection(ws: WebSocket, origin: string | undefined): void {
       ws.close(4009, "already paired");
       return;
     }
-    attachTab(ws);
+    attachTab(ws, nonce);
   });
 }
 
@@ -342,6 +389,7 @@ async function main(): Promise<void> {
   }
   const addr = wss.address();
   const port = typeof addr === "object" && addr ? addr.port : args.port;
+  pairPort = port;
   pairUrl = `${args.appUrl}/connect?port=${port}&token=${token}`;
 
   wss.on("connection", (ws, req) => onConnection(ws, req.headers.origin));
