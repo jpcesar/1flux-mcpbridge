@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @1flux/bridge — ponte stdio ↔ WebSocket local.
+ * @1fluxo/bridge — ponte stdio ↔ WebSocket local.
  *
  * Lançado por um cliente MCP (Claude Code, Claude Desktop) via stdio. Abre um
  * servidor WebSocket em 127.0.0.1 e espera que o 1fluxo aberto no browser se
@@ -45,7 +45,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { WebSocketServer, type WebSocket } from "ws";
 
-const VERSION = "0.2.0";
+const VERSION = "1.0.0";
 const DEFAULT_PORT = 17337;
 const DEFAULT_APP_URL = "http://localhost:3000";
 /** Origens do web app que podem emparelhar. `--origin` acrescenta outras; a

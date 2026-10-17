@@ -1,4 +1,4 @@
-# @1flux/bridge
+# @1fluxo/bridge
 
 Ponte local `stdio ↔ WebSocket` que liga um cliente MCP (Claude Desktop, Claude
 Code) ao 1fluxo aberto no browser, com emparelhamento persistente.
@@ -55,6 +55,24 @@ até 10 s e depois falha com um erro JSON-RPC legível que diz o que fazer
 - Em Definições → Ligação a IA → "Esquecer este bridge": o tab manda
   `{ type: "forget" }` e o bridge apaga o ficheiro.
 - À mão: `node dist/index.js --forget` (apaga e termina).
+
+## Extensão para o Claude Desktop (`.mcpb`)
+
+```bash
+npm run pack:mcpb
+```
+
+Compila, monta `dist-mcpb/stage/` só com `manifest.json`, `dist/`, o
+`package.json` de produção, o `node_modules` de runtime (`ws`) e o ícone, faz o
+zip `dist-mcpb/1fluxo-bridge-<versão>.mcpb` (com o `zip` do sistema) e copia-o
+para `public/downloads/` da web app, de onde Definições → Ligação a IA o liga.
+A versão do `manifest.json` tem de bater com a do `package.json` (e com
+`src/lib/mcp/bridge-release.ts` na web app).
+
+O utilizador abre o ficheiro com o Claude Desktop e confirma a instalação. A
+extensão lança `node dist/index.js --app-url <Endereço do 1fluxo> --state-dir
+~/.1fluxo`; o endereço muda-se nas definições da extensão (`user_config`), para
+apontar a outro ambiente do 1fluxo.
 
 ## Uso (dev, por caminho local)
 

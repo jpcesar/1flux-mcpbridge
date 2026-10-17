@@ -1,11 +1,11 @@
 {
-  "name": "@1flux/bridge",
-  "version": "0.2.0",
+  "name": "@1fluxo/bridge",
+  "version": "1.0.0",
   "private": true,
-  "description": "Ponte stdio ↔ WebSocket local que liga um cliente MCP (Claude Code) ao 1fluxo aberto no browser. Não interpreta tools nem vê dados.",
+  "description": "Ponte stdio ↔ WebSocket local que liga um cliente MCP (Claude Desktop, Claude Code) ao 1fluxo aberto no browser. Não interpreta tools nem vê dados.",
   "type": "module",
   "bin": {
-    "1flux-bridge": "dist/index.js"
+    "1fluxo-bridge": "dist/index.js"
   },
   "files": [
     "dist"
@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test \"test/**/*.test.mjs\"",
+    "pack:mcpb": "node scripts/pack-mcpb.mjs",
     "start": "node dist/index.js"
   },
   "engines": {

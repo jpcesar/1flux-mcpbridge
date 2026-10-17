@@ -1,0 +1,50 @@
+{
+  "manifest_version": "0.3",
+  "name": "1fluxo-bridge",
+  "display_name": "1fluxo",
+  "version": "1.0.0",
+  "description": "Liga o Claude aos seus dados do 1fluxo, decifrados no seu browser. Nada passa pelos servidores do 1fluxo.",
+  "long_description": "Ponte local entre o Claude Desktop e o 1fluxo aberto no seu browser. Os dados são decifrados na sua máquina, pela sessão que já tem aberta; o 1fluxo nunca os vê. Depois de instalar, peça ao Claude «liga-te ao 1fluxo»: ele devolve uma ligação de emparelhamento — abra-a e carregue em Permitir. A partir daí basta ter o 1fluxo aberto no browser.",
+  "author": { "name": "1fluxo", "url": "https://1fluxo.com" },
+  "homepage": "https://1fluxo.com",
+  "documentation": "https://1fluxo.com/settings/assistants",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js",
+        "--app-url",
+        "${user_config.app_url}",
+        "--state-dir",
+        "${HOME}/.1fluxo"
+      ]
+    }
+  },
+  "tools": [
+    { "name": "list_months", "description": "Meses existentes e o seu estado" },
+    { "name": "get_month_summary", "description": "Totais de um mês por canal, com plano e real" },
+    { "name": "list_movements", "description": "Movimentos de um mês, decifrados" },
+    { "name": "search_movements", "description": "Pesquisa de movimentos por descrição" },
+    { "name": "list_accounts", "description": "Contas e saldos" },
+    { "name": "list_categories", "description": "Categorias por canal" },
+    { "name": "get_annual_overview", "description": "Visão anual resumida" }
+  ],
+  "user_config": {
+    "app_url": {
+      "type": "string",
+      "title": "Endereço do 1fluxo",
+      "description": "Normalmente https://1fluxo.com. Só mude se usar outro ambiente do 1fluxo.",
+      "default": "https://1fluxo.com",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "node": ">=20.0.0" }
+  },
+  "keywords": ["finanças", "1fluxo", "zero-knowledge"],
+  "license": "UNLICENSED"
+}
