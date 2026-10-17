@@ -418,7 +418,9 @@ function handleClientMessage(msg: JsonRpcMessage, line: string): void {
   if (!hasId(msg)) return;
 
   // Alguém perguntou algo e não há tab: é a altura de pôr o 1fluxo à frente.
-  openBrowserForTab();
+  // Só nas tool calls — o `tools/list` que os clientes fazem ao arrancar não
+  // é a pessoa a pedir nada, e abrir o browser a cada arranque seria intruso.
+  if (msg.method === "tools/call") openBrowserForTab();
 
   const entry: Queued = {
     line,
