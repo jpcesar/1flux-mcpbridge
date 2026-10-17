@@ -38,6 +38,7 @@
  * erro JSON-RPC legível — nunca fica pendurado.
  */
 
+import { spawn } from "node:child_process";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -67,6 +68,9 @@ const DEFAULT_STATE_DIR = join(homedir(), ".1fluxo");
 const PAIRING_FILE = "bridge-pairing.json";
 /** Validade de um emparelhamento: ao fim disto o tab volta a pedir «Permitir». */
 const PAIRING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Entre aberturas automáticas do browser: um pedido sem tab abre-o, os
+ *  seguintes no mesmo minuto não. */
+const OPEN_COOLDOWN_MS = 60_000;
 
 /** Código JSON-RPC (gama "server error") para "sem tab ligado". */
 const ERR_NO_TAB = -32000;
@@ -83,17 +87,26 @@ type JsonRpcMessage = {
 
 /* ── argumentos ─────────────────────────────────────────────────────────── */
 
-type Args = { port: number; appUrl: string; origins: string[]; stateDir: string; forget: boolean };
+type Args = {
+  port: number;
+  appUrl: string;
+  origins: string[];
+  stateDir: string;
+  forget: boolean;
+  /** Abrir o browser sozinho quando um pedido chega sem tab ligado. */
+  open: boolean;
+};
 
 function usage(): string {
   return [
-    "Uso: 1flux-bridge [--port N] [--app-url URL] [--origin URL]... [--state-dir DIR] [--forget]",
+    "Uso: 1flux-bridge [--port N] [--app-url URL] [--origin URL]... [--state-dir DIR] [--forget] [--no-open]",
     "",
     `  --port N        porta do WebSocket local (defeito ${DEFAULT_PORT}; se ocupada escolhe outra)`,
     `  --app-url URL   onde o 1fluxo está a correr (defeito ${DEFAULT_APP_URL})`,
     "  --origin URL    origem adicional autorizada a emparelhar (repetível)",
     `  --state-dir DIR onde fica o emparelhamento (defeito ${DEFAULT_STATE_DIR})`,
     "  --forget        apaga o emparelhamento guardado e termina",
+    "  --no-open       não abrir o browser sozinho quando um pedido chega sem tab ligado",
     "",
     "Lançado por um cliente MCP via stdio, p. ex.:",
     "  claude mcp add 1flux -- node <caminho>/packages/bridge/dist/index.js",
@@ -107,6 +120,7 @@ function parseArgs(argv: string[]): Args {
     origins: [],
     stateDir: DEFAULT_STATE_DIR,
     forget: false,
+    open: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -132,6 +146,8 @@ function parseArgs(argv: string[]): Args {
       args.stateDir = dir && !dir.includes("${") ? dir : DEFAULT_STATE_DIR;
     } else if (a === "--forget") {
       args.forget = true;
+    } else if (a === "--no-open") {
+      args.open = false;
     } else {
       throw new Error(`argumento desconhecido: ${a}\n\n${usage()}`);
     }
@@ -265,6 +281,38 @@ function safeEqual(candidate: unknown, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+let browserOpenedAt = 0;
+
+/**
+ * Abre o browser do sistema: no consentimento, se ainda não há
+ * emparelhamento; no 1fluxo, se há (o tab liga-se sozinho). Chamado quando
+ * um pedido chega sem tab ligado — a pessoa perguntou algo ao assistente, é
+ * agora que quer o browser à frente. Sem shell pelo meio, para o `&` da URL
+ * chegar inteiro. Falhar aqui só tira a comodidade: o erro JSON-RPC continua
+ * a dizer que URL abrir à mão.
+ */
+function openBrowserForTab(): void {
+  if (!args.open) return;
+  const now = Date.now();
+  if (now - browserOpenedAt < OPEN_COOLDOWN_MS) return;
+  browserOpenedAt = now;
+  const url = pairingValid(pairing) ? `${args.appUrl}/dashboard` : pairUrl;
+  const [cmd, cmdArgs] =
+    process.platform === "darwin"
+      ? ["open", [url]]
+      : process.platform === "win32"
+        ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+        : ["xdg-open", [url]];
+  try {
+    const child = spawn(cmd, cmdArgs, { stdio: "ignore", detached: true });
+    child.on("error", () => log(`Não consegui abrir o browser; abre à mão: ${url}`));
+    child.unref();
+    log(`A abrir o browser: ${url}`);
+  } catch {
+    log(`Não consegui abrir o browser; abre à mão: ${url}`);
+  }
+}
+
 function noTabMessage(): string {
   return pairingValid(pairing)
     ? `O 1fluxo não está ligado neste momento. Abre o 1fluxo no browser (${args.appUrl}) com a sessão desbloqueada — a ligação faz-se sozinha. Se não ligar, abre ${pairUrl} para emparelhar de novo.`
@@ -363,6 +411,9 @@ function handleClientMessage(msg: JsonRpcMessage, line: string): void {
   }
   // Notificações sem destino não têm a quem responder — descartam-se.
   if (!hasId(msg)) return;
+
+  // Alguém perguntou algo e não há tab: é a altura de pôr o 1fluxo à frente.
+  openBrowserForTab();
 
   const entry: Queued = {
     line,

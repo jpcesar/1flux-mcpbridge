@@ -34,7 +34,7 @@ function nonce() {
 /** Arranca o bridge e espera pela URL de emparelhamento no stderr. */
 function startBridge(stateDir, extra = []) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [BIN, "--port", "0", "--app-url", ORIGIN, "--state-dir", stateDir, ...extra], {
+    const proc = spawn(process.execPath, [BIN, "--port", "0", "--app-url", ORIGIN, "--state-dir", stateDir, "--no-open", ...extra], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     procs.add(proc);

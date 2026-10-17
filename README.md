@@ -33,9 +33,11 @@ autorizada **e** o handshake for válido (token de uso único, ou prova do
 segredo). Comparações em tempo constante.
 
 Sem tab ligado, `initialize` e `ping` são respondidos localmente (senão o
-cliente dava o servidor como morto ao arrancar); qualquer outro pedido espera
-até 10 s e depois falha com um erro JSON-RPC legível que diz o que fazer
-(abrir o 1fluxo, ou emparelhar pela URL). Quando o tab liga, o bridge envia
+cliente dava o servidor como morto ao arrancar); qualquer outro pedido **abre
+o browser do sistema** (no consentimento, se ainda não há emparelhamento; no
+1fluxo, se há — o tab liga-se sozinho), no máximo uma vez por minuto, espera
+até 10 s e depois falha com um erro JSON-RPC legível que diz o que fazer.
+`--no-open` desliga a abertura automática. Quando o tab liga, o bridge envia
 `notifications/tools/list_changed` para o cliente voltar a pedir as tools.
 
 ### Códigos de fecho
@@ -97,6 +99,7 @@ pergunta de novo. Nas vezes seguintes basta ter o 1fluxo aberto no browser.
 | `--origin URL` | — | origem adicional autorizada a emparelhar (repetível) |
 | `--state-dir DIR` | `~/.1fluxo` | onde fica `bridge-pairing.json` |
 | `--forget` | — | apaga o emparelhamento guardado e termina |
+| `--no-open` | — | não abrir o browser sozinho quando um pedido chega sem tab ligado |
 
 Origens autorizadas por defeito: as do 1fluxo em produção. A origem de `--app-url`
 entra sempre, e `--origin` acrescenta outras.
