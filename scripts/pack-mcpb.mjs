@@ -34,6 +34,7 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
 cpSync(join(root, "manifest.json"), join(stage, "manifest.json"));
+cpSync(join(root, "tools.json"), join(stage, "tools.json"));
 cpSync(join(root, "dist"), join(stage, "dist"), { recursive: true });
 // O ícone da app serve de ícone da extensão.
 const icon = join(root, "..", "..", "public", "icon-192.png");
@@ -51,7 +52,7 @@ run("npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-l
 
 const fileName = `1fluxo-bridge-${pkg.version}.mcpb`;
 const file = join(out, fileName);
-const entries = ["manifest.json", "dist", "package.json", "node_modules", ...(existsSync(join(stage, "icon.png")) ? ["icon.png"] : [])];
+const entries = ["manifest.json", "tools.json", "dist", "package.json", "node_modules", ...(existsSync(join(stage, "icon.png")) ? ["icon.png"] : [])];
 run(`zip -r -q -X ${JSON.stringify(file)} ${entries.join(" ")}`, stage);
 
 const downloads = join(root, "..", "..", "public", "downloads");

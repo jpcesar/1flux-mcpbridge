@@ -74,6 +74,9 @@ const PAIRING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Entre aberturas automáticas do browser: um pedido sem tab abre-o, os
  *  seguintes no mesmo minuto não. */
 const OPEN_COOLDOWN_MS = 60_000;
+/** Uma tool call sem tab abre o browser e espera por este tempo pelo
+ *  «Permitir» — para a primeira pergunta ser mesmo respondida. */
+const TOOL_CALL_WAIT_MS = 60_000;
 
 /** Código JSON-RPC (gama "server error") para "sem tab ligado". */
 const ERR_NO_TAB = -32000;
@@ -175,6 +178,22 @@ let pairPort = 0;
  *  a fila. */
 let pendingConnections = 0;
 const MAX_PENDING = 3;
+
+/**
+ * Cópia das tools da web app (`packages/bridge/tools.json`, gerada e
+ * verificada por `src/lib/mcp/tools-sync.test.ts`). Serve o `tools/list`
+ * quando não há tab: senão o cliente arranca sem tools e nunca chega a fazer
+ * a chamada que abre o browser. Com tab, é o tab que responde.
+ */
+function loadToolsJson(): unknown[] {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(new URL("../tools.json", import.meta.url), "utf8"));
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+const TOOLS = loadToolsJson();
 
 let tab: WebSocket | null = null;
 /** Quem é o cliente MCP (`clientInfo` do `initialize`): vai ao tab no `paired`,
@@ -415,22 +434,30 @@ function handleClientMessage(msg: JsonRpcMessage, line: string): void {
     writeOut({ jsonrpc: "2.0", id: msg.id, result: {} });
     return;
   }
+  if (hasId(msg) && msg.method === "tools/list" && TOOLS.length > 0) {
+    writeOut({ jsonrpc: "2.0", id: msg.id, result: { tools: TOOLS } });
+    return;
+  }
   // Notificações sem destino não têm a quem responder — descartam-se.
   if (!hasId(msg)) return;
 
-  // Alguém perguntou algo e não há tab: é a altura de pôr o 1fluxo à frente.
-  // Só nas tool calls — o `tools/list` que os clientes fazem ao arrancar não
-  // é a pessoa a pedir nada, e abrir o browser a cada arranque seria intruso.
-  if (msg.method === "tools/call") openBrowserForTab();
+  // Alguém perguntou algo e não há tab: é a altura de pôr o 1fluxo à frente,
+  // e de esperar que a pessoa carregue em «Permitir». Só nas tool calls — o
+  // `tools/list` do arranque não é a pessoa a pedir nada.
+  const isCall = msg.method === "tools/call";
+  if (isCall) openBrowserForTab();
 
   const entry: Queued = {
     line,
     msg,
-    timer: setTimeout(() => {
-      const i = queue.indexOf(entry);
-      if (i >= 0) queue.splice(i, 1);
-      replyError(msg.id, ERR_NO_TAB, noTabMessage());
-    }, NO_TAB_WAIT_MS),
+    timer: setTimeout(
+      () => {
+        const i = queue.indexOf(entry);
+        if (i >= 0) queue.splice(i, 1);
+        replyError(msg.id, ERR_NO_TAB, noTabMessage());
+      },
+      isCall ? TOOL_CALL_WAIT_MS : NO_TAB_WAIT_MS
+    ),
   };
   queue.push(entry);
 }

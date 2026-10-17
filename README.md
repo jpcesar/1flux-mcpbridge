@@ -32,12 +32,13 @@ Só é aceite **uma** ligação de cada vez, e só se o `Origin` estiver na list
 autorizada **e** o handshake for válido (token de uso único, ou prova do
 segredo). Comparações em tempo constante.
 
-Sem tab ligado, `initialize` e `ping` são respondidos localmente (senão o
-cliente dava o servidor como morto ao arrancar); qualquer outro pedido **abre
-o browser do sistema** (no consentimento, se ainda não há emparelhamento; no
-1fluxo, se há — o tab liga-se sozinho), no máximo uma vez por minuto, espera
-até 10 s e depois falha com um erro JSON-RPC legível que diz o que fazer.
-`--no-open` desliga a abertura automática. Quando o tab liga, o bridge envia
+Sem tab ligado, `initialize`, `ping` e `tools/list` são respondidos localmente
+(o `tools/list` com a cópia das tools em `tools.json`, gerada e verificada por
+`src/lib/mcp/tools-sync.test.ts` na web app — senão o cliente arrancava sem
+tools). Uma `tools/call` sem tab **abre o browser do sistema** na página de
+ligação (`/connect`, que retoma o emparelhamento do utilizador actual ou pede
+«Permitir»), no máximo uma vez por minuto, e espera até 60 s pelo tab antes de
+falhar com um erro JSON-RPC legível. `--no-open` desliga a abertura automática. Quando o tab liga, o bridge envia
 `notifications/tools/list_changed` para o cliente voltar a pedir as tools.
 
 ### Códigos de fecho

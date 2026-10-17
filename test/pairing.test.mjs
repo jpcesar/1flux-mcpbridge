@@ -39,13 +39,17 @@ function startBridge(stateDir, extra = []) {
     });
     procs.add(proc);
     let stderr = "";
+    const stdoutLines = [];
+    proc.stdout.on("data", (chunk) => {
+      for (const line of chunk.toString().split("\n")) if (line.trim()) stdoutLines.push(line);
+    });
     const timer = setTimeout(() => reject(new Error(`bridge não arrancou:\n${stderr}`)), 8_000);
     proc.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
       const m = stderr.match(/connect\?port=(\d+)&token=([\w-]+)/);
       if (m) {
         clearTimeout(timer);
-        resolve({ proc, port: Number(m[1]), token: m[2], stderr: () => stderr });
+        resolve({ proc, port: Number(m[1]), token: m[2], stderr: () => stderr, stdoutLines });
       }
     });
     proc.on("exit", (code) => {
@@ -53,6 +57,27 @@ function startBridge(stateDir, extra = []) {
       procs.delete(proc);
       resolve({ proc, exitCode: code, stderr: () => stderr });
     });
+  });
+}
+
+/** Manda um pedido JSON-RPC ao bridge pelo stdin e espera a resposta com o mesmo id no stdout. */
+function rpc(bridge, msg, timeoutMs = 3_000) {
+  bridge.proc.stdin.write(JSON.stringify(msg) + "\n");
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      for (const line of bridge.stdoutLines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.id === msg.id) return resolve(parsed);
+        } catch {
+          // linha que não é JSON — ignora
+        }
+      }
+      if (Date.now() - started > timeoutMs) return reject(new Error(`sem resposta ao pedido ${msg.id}`));
+      setTimeout(tick, 25);
+    };
+    tick();
   });
 }
 
@@ -203,4 +228,22 @@ test("«forget» do tab apaga o emparelhamento; --forget idem", async () => {
   const forget = await startBridge(stateDir, ["--forget"]);
   assert.equal(forget.exitCode, 0);
   assert.ok(!existsSync(pairingFile(stateDir)));
+});
+
+test("sem tab, initialize e tools/list respondem localmente com as tools embebidas", async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "1fluxo-bridge-"));
+  const bridge = await startBridge(stateDir);
+  const init = await rpc(bridge, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "teste", version: "1" } },
+  });
+  assert.equal(init.result?.serverInfo?.name, "1fluxo");
+  assert.match(init.result.instructions, /connect\?port=/);
+  const list = await rpc(bridge, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+  const names = list.result.tools.map((t) => t.name);
+  assert.ok(names.includes("list_months") && names.includes("search_movements"), names.join(","));
+  assert.equal(names.length, 7);
+  bridge.proc.kill("SIGTERM");
 });

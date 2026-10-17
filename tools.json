@@ -1,0 +1,124 @@
+[
+  {
+    "name": "list_months",
+    "description": "Lista os meses que existem no 1fluxo, do mais antigo ao mais recente, com o estado de cada um (open = em curso, closed = fechado pelo utilizador) e o saldo líquido do mês. O utilizador cria os meses um a um, por isso pode haver meses em falta. Use isto antes de pedir resumos ou movimentos.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_month_summary",
+    "description": "Totais de um mês: rendimento, despesas fixas, despesas de orçamento (variáveis), poupança, extras, resgates de poupança, saldo de abertura e saldo de fecho (real se o mês estiver fechado, projectado se não). Despesas vêm como valores positivos. Use list_movements para ver o detalhe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "year": {
+          "type": "integer",
+          "description": "Ano, p. ex. 2026."
+        },
+        "month": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Mês de 1 (janeiro) a 12 (dezembro)."
+        }
+      },
+      "required": [
+        "year",
+        "month"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_movements",
+    "description": "Movimentos de um mês do 1fluxo (extractos importados e registos manuais), por ordem de data, com descrição, montante com sinal (negativo = saída), tipo, categoria, conta e notas. Filtro opcional por nome de categoria (parcial, sem acentos). Para procurar por texto em vários meses use search_movements. O `id` de cada movimento é o que update_movement, delete_movement e consolidate_movements recebem.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "year": {
+          "type": "integer",
+          "description": "Ano, p. ex. 2026."
+        },
+        "month": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Mês de 1 a 12."
+        },
+        "category": {
+          "type": "string",
+          "description": "Nome (ou parte do nome) da categoria — p. ex. \"supermercado\". Opcional."
+        }
+      },
+      "required": [
+        "year",
+        "month"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_movements",
+    "description": "Pesquisa movimentos pela descrição ou notas (parcial, sem acentos nem maiúsculas) num intervalo de datas, em todas as contas — incluindo as que ficam fora do orçamento mensal. Sem datas, cobre os últimos 12 meses. Devolve os mais recentes primeiro e o total dos montantes encontrados.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 2,
+          "description": "Texto a procurar, p. ex. \"continente\"."
+        },
+        "from": {
+          "type": "string",
+          "description": "Data inicial AAAA-MM-DD (inclusive). Opcional."
+        },
+        "to": {
+          "type": "string",
+          "description": "Data final AAAA-MM-DD (inclusive). Opcional."
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_accounts",
+    "description": "Contas do utilizador com saldo de cash, valor de activos (títulos, fundos, depósitos), dívida (cartão de crédito) e património por conta, agrupadas como na app (Principais, Investimentos, Outras Contas), mais os totais. Os mesmos números que a página Contas mostra.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_categories",
+    "description": "Categorias do utilizador agrupadas por tipo (bucket): rendimento, despesas fixas, orçamento (variáveis), extras e poupança. Inclui se está activa e o valor mensal de referência quando existe. Use os nomes daqui no filtro de list_movements.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_annual_overview",
+    "description": "Visão anual: para cada mês do ano que exista no 1fluxo, rendimento, despesas (fixas e orçamento), poupança, extras, saldo líquido e saldo de fecho; e os totais do ano. Meses sem dados não aparecem.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "year": {
+          "type": "integer",
+          "description": "Ano, p. ex. 2026."
+        }
+      },
+      "required": [
+        "year"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
