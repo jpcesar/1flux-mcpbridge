@@ -48,6 +48,9 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 const VERSION = "1.0.0";
 const DEFAULT_PORT = 17337;
+/** Com a porta ocupada tenta-se as seguintes, por esta ordem, para o tab do
+ *  1fluxo as poder varrer (espelha `BRIDGE_PORT_RANGE` na web app). */
+const PORT_FALLBACKS = 10;
 const DEFAULT_APP_URL = "http://localhost:3000";
 /** Origens do web app que podem emparelhar. `--origin` acrescenta outras; a
  *  origem de `--app-url` entra sempre. */
@@ -296,7 +299,9 @@ function openBrowserForTab(): void {
   const now = Date.now();
   if (now - browserOpenedAt < OPEN_COOLDOWN_MS) return;
   browserOpenedAt = now;
-  const url = pairingValid(pairing) ? `${args.appUrl}/dashboard` : pairUrl;
+  // Com emparelhamento, o 1fluxo liga-se sozinho; a porta vai na URL para o
+  // tab não ficar agarrado à porta de quando emparelhou.
+  const url = pairingValid(pairing) ? `${args.appUrl}/dashboard?bridge=${pairPort}` : pairUrl;
   const [cmd, cmdArgs] =
     process.platform === "darwin"
       ? ["open", [url]]
@@ -653,14 +658,20 @@ async function main(): Promise<void> {
     pairing = stored;
   }
 
-  let wss: WebSocketServer;
-  try {
-    wss = await listen(args.port);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
-    log(`Porta ${args.port} ocupada; a escolher outra.`);
-    wss = await listen(0);
+  let wss: WebSocketServer | null = null;
+  // Porta pedida, depois as seguintes (o tab varre a mesma gama); só no fim
+  // uma qualquer. `--port 0` é «qualquer», sem gama.
+  const candidates = args.port === 0 ? [0] : Array.from({ length: PORT_FALLBACKS }, (_, i) => args.port + i);
+  for (const candidate of candidates) {
+    try {
+      wss = await listen(candidate);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
+      log(`Porta ${candidate} ocupada; a tentar a seguinte.`);
+    }
   }
+  if (!wss) wss = await listen(0);
   const addr = wss.address();
   const port = typeof addr === "object" && addr ? addr.port : args.port;
   pairPort = port;
