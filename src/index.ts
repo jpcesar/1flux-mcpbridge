@@ -158,6 +158,9 @@ let pendingConnections = 0;
 const MAX_PENDING = 3;
 
 let tab: WebSocket | null = null;
+/** Quem é o cliente MCP (`clientInfo` do `initialize`): vai ao tab no `paired`,
+ *  para a app dizer «Claude Code ligado» em vez de «assistente ligado». */
+let clientInfo: { name: string; version?: string } | null = null;
 /** O cliente já completou o handshake MCP — só depois disso se pode mandar
  *  `notifications/tools/list_changed`. */
 let clientInitialized = false;
@@ -326,6 +329,17 @@ function forwardToTab(msg: JsonRpcMessage, line: string): void {
 }
 
 function handleClientMessage(msg: JsonRpcMessage, line: string): void {
+  if (msg.method === "initialize") {
+    const params = (msg.params ?? {}) as { clientInfo?: { name?: unknown; version?: unknown } };
+    const name = typeof params.clientInfo?.name === "string" ? params.clientInfo.name.trim().slice(0, 80) : "";
+    if (name) {
+      clientInfo = {
+        name,
+        version:
+          typeof params.clientInfo?.version === "string" ? params.clientInfo.version.slice(0, 40) : undefined,
+      };
+    }
+  }
   if (msg.method === "notifications/initialized") {
     clientInitialized = true;
     if (tab) tab.send(line);
@@ -406,6 +420,7 @@ function attachTab(ws: WebSocket, nonce: string, mode: AttachMode): void {
     hello = {
       type: "paired",
       bridge: VERSION,
+      client: clientInfo,
       proof: pairingProof(nonce),
       pairing: { id: pairing.id, secret: pairing.secret, expiresAt: pairing.expiresAt },
     };
@@ -414,6 +429,7 @@ function attachTab(ws: WebSocket, nonce: string, mode: AttachMode): void {
     hello = {
       type: "paired",
       bridge: VERSION,
+      client: clientInfo,
       proof: hmac(mode.pairing.secret, `bridge:${nonce}`),
       pairing: { id: mode.pairing.id, expiresAt: mode.pairing.expiresAt },
     };

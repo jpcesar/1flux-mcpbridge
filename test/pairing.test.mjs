@@ -88,9 +88,20 @@ function pairingFile(stateDir) {
 test("primeiro emparelhamento devolve o segredo e grava-o em disco", async () => {
   const stateDir = mkdtempSync(join(tmpdir(), "1fluxo-bridge-"));
   const bridge = await startBridge(stateDir);
+  // O cliente MCP apresenta-se primeiro; o nome tem de chegar ao tab.
+  bridge.proc.stdin.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "cliente-de-teste", version: "9" } },
+    }) + "\n"
+  );
+  await new Promise((r) => setTimeout(r, 200));
   const n = nonce();
   const { ws, message } = await handshake(bridge.port, { type: "pair", token: bridge.token, nonce: n });
   assert.equal(message.type, "paired");
+  assert.deepEqual(message.client, { name: "cliente-de-teste", version: "9" });
   assert.equal(message.proof, hmac(bridge.token, n), "prova do token");
   assert.ok(message.pairing?.id && message.pairing?.secret && message.pairing?.expiresAt);
   assert.ok(existsSync(pairingFile(stateDir)), "ficheiro de emparelhamento");
