@@ -287,8 +287,7 @@ function safeEqual(candidate: unknown, expected: string): boolean {
 let browserOpenedAt = 0;
 
 /**
- * Abre o browser do sistema: no consentimento, se ainda não há
- * emparelhamento; no 1fluxo, se há (o tab liga-se sozinho). Chamado quando
+ * Abre o browser do sistema na página de ligação. Chamado quando
  * um pedido chega sem tab ligado — a pessoa perguntou algo ao assistente, é
  * agora que quer o browser à frente. Sem shell pelo meio, para o `&` da URL
  * chegar inteiro. Falhar aqui só tira a comodidade: o erro JSON-RPC continua
@@ -299,9 +298,11 @@ function openBrowserForTab(): void {
   const now = Date.now();
   if (now - browserOpenedAt < OPEN_COOLDOWN_MS) return;
   browserOpenedAt = now;
-  // Com emparelhamento, o 1fluxo liga-se sozinho; a porta vai na URL para o
-  // tab não ficar agarrado à porta de quando emparelhou.
-  const url = pairingValid(pairing) ? `${args.appUrl}/dashboard?bridge=${pairPort}` : pairUrl;
+  // Sempre o /connect: a página tenta retomar com o emparelhamento que o
+  // utilizador actual tiver (e segue para o dashboard) e, se não houver,
+  // mostra o «Permitir» com este token. Serve o utilizador de sempre e um
+  // utilizador novo no mesmo browser, sem o bridge ter de adivinhar.
+  const url = pairUrl;
   const [cmd, cmdArgs] =
     process.platform === "darwin"
       ? ["open", [url]]
