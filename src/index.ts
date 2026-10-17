@@ -2,16 +2,16 @@
 /**
  * @1flux/bridge — ponte stdio ↔ WebSocket local.
  *
- * Lançado por um cliente MCP (Claude Code) via stdio. Abre um servidor
- * WebSocket em 127.0.0.1 e espera que o 1fluxo aberto no browser se ligue a
- * ele com um token de emparelhamento. A partir daí é um cano: cada linha
- * JSON-RPC do stdin segue para o tab; cada mensagem do tab sai no stdout.
+ * Lançado por um cliente MCP (Claude Code, Claude Desktop) via stdio. Abre um
+ * servidor WebSocket em 127.0.0.1 e espera que o 1fluxo aberto no browser se
+ * ligue a ele. A partir daí é um cano: cada linha JSON-RPC do stdin segue
+ * para o tab; cada mensagem do tab sai no stdout.
  *
  * O que este processo NÃO faz, de propósito:
  *  - não interpreta tools nem lê o conteúdo das mensagens — só `id` e
  *    `method`, para saber a quem responder quando o tab desaparece;
  *  - não fala com a rede: a única ligação que aceita é do loopback;
- *  - não persiste nada nem escreve conteúdo em logs (o stderr só tem eventos
+ *  - não persiste dados nem escreve conteúdo em logs (o stderr só tem eventos
  *    de ligação, nunca pedidos ou respostas).
  *
  * Zero-knowledge é face ao 1fluxo: a decifragem acontece no tab, com a sessão
@@ -19,21 +19,33 @@
  * na máquina do utilizador, ao lado do cliente MCP que o vai receber de
  * qualquer maneira.
  *
+ * Emparelhamento: a primeira ligação faz-se com o token de uso
+ * único impresso na URL de emparelhamento (o utilizador abre-a e carrega em
+ * «Permitir»). Nessa altura o bridge gera um segredo de emparelhamento,
+ * guarda-o em `<state-dir>/bridge-pairing.json` (só legível pelo utilizador)
+ * e devolve-o ao tab, que o guarda no browser. Durante 30 dias qualquer tab
+ * do 1fluxo retoma a ligação provando conhecer o segredo (HMAC de um nonce),
+ * e o bridge prova o mesmo ao tab — o segredo nunca volta a passar no fio. O
+ * ficheiro só tem esse segredo: não abre dados nenhuns.
+ *
  * Duas excepções ao "cano burro", ambas só quando NÃO há tab ligado:
  *  - `initialize` é respondido localmente, senão o cliente dava o servidor
  *    como morto ao arrancar (o Claude Code lança o processo e pergunta logo).
- *    A resposta traz a URL de emparelhamento em `instructions`, para o modelo
- *    saber dizer ao utilizador o que fazer.
+ *    A resposta diz ao modelo o que o utilizador tem de fazer (abrir o
+ *    1fluxo, ou emparelhar pela URL).
  *  - `ping` é respondido localmente pelo mesmo motivo.
  * Tudo o resto espera até NO_TAB_WAIT_MS por um tab e depois falha com um
  * erro JSON-RPC legível — nunca fica pendurado.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { WebSocketServer, type WebSocket } from "ws";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const DEFAULT_PORT = 17337;
 const DEFAULT_APP_URL = "http://localhost:3000";
 /** Origens do web app que podem emparelhar. `--origin` acrescenta outras; a
@@ -50,6 +62,11 @@ const NO_TAB_WAIT_MS = 10_000;
  *  `initialize` devolve a pedida se estiver aqui, senão a mais recente.
  *  Espelha `src/lib/mcp/protocol.ts` na web app. */
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+/** Onde fica o emparelhamento persistente. */
+const DEFAULT_STATE_DIR = join(homedir(), ".1fluxo");
+const PAIRING_FILE = "bridge-pairing.json";
+/** Validade de um emparelhamento: ao fim disto o tab volta a pedir «Permitir». */
+const PAIRING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Código JSON-RPC (gama "server error") para "sem tab ligado". */
 const ERR_NO_TAB = -32000;
@@ -66,15 +83,17 @@ type JsonRpcMessage = {
 
 /* ── argumentos ─────────────────────────────────────────────────────────── */
 
-type Args = { port: number; appUrl: string; origins: string[] };
+type Args = { port: number; appUrl: string; origins: string[]; stateDir: string; forget: boolean };
 
 function usage(): string {
   return [
-    "Uso: 1flux-bridge [--port N] [--app-url URL] [--origin URL]...",
+    "Uso: 1flux-bridge [--port N] [--app-url URL] [--origin URL]... [--state-dir DIR] [--forget]",
     "",
     `  --port N        porta do WebSocket local (defeito ${DEFAULT_PORT}; se ocupada escolhe outra)`,
     `  --app-url URL   onde o 1fluxo está a correr (defeito ${DEFAULT_APP_URL})`,
     "  --origin URL    origem adicional autorizada a emparelhar (repetível)",
+    `  --state-dir DIR onde fica o emparelhamento (defeito ${DEFAULT_STATE_DIR})`,
+    "  --forget        apaga o emparelhamento guardado e termina",
     "",
     "Lançado por um cliente MCP via stdio, p. ex.:",
     "  claude mcp add 1flux -- node <caminho>/packages/bridge/dist/index.js",
@@ -82,7 +101,13 @@ function usage(): string {
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { port: DEFAULT_PORT, appUrl: DEFAULT_APP_URL, origins: [] };
+  const args: Args = {
+    port: DEFAULT_PORT,
+    appUrl: DEFAULT_APP_URL,
+    origins: [],
+    stateDir: DEFAULT_STATE_DIR,
+    forget: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -101,6 +126,12 @@ function parseArgs(argv: string[]): Args {
       args.appUrl = new URL(next()).toString().replace(/\/$/, "");
     } else if (a === "--origin") {
       args.origins.push(new URL(next()).origin);
+    } else if (a === "--state-dir") {
+      // Vazio (ex.: `${HOME}` por resolver num manifesto) → defeito.
+      const dir = next().trim();
+      args.stateDir = dir && !dir.includes("${") ? dir : DEFAULT_STATE_DIR;
+    } else if (a === "--forget") {
+      args.forget = true;
     } else {
       throw new Error(`argumento desconhecido: ${a}\n\n${usage()}`);
     }
@@ -138,6 +169,64 @@ const pending = new Map<string, { id: JsonRpcId; method: string }>();
 type Queued = { line: string; msg: JsonRpcMessage; timer: NodeJS.Timeout };
 const queue: Queued[] = [];
 
+/* ── emparelhamento persistente ─────────────────────────────── */
+
+type Pairing = {
+  id: string;
+  secret: string;
+  origin: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+let pairing: Pairing | null = null;
+
+function pairingPath(): string {
+  return join(args.stateDir, PAIRING_FILE);
+}
+
+function isPairing(v: unknown): v is Pairing {
+  if (!v || typeof v !== "object") return false;
+  const p = v as Record<string, unknown>;
+  return (
+    typeof p.id === "string" &&
+    typeof p.secret === "string" &&
+    p.secret.length >= 32 &&
+    typeof p.origin === "string" &&
+    typeof p.createdAt === "string" &&
+    typeof p.expiresAt === "string" &&
+    !Number.isNaN(Date.parse(p.expiresAt))
+  );
+}
+
+function loadPairing(): Pairing | null {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(pairingPath(), "utf8"));
+    return isPairing(raw) ? raw : null;
+  } catch {
+    return null; // sem ficheiro, ou ilegível — como se não houvesse
+  }
+}
+
+function savePairing(p: Pairing): void {
+  // Só o utilizador lê a pasta e o ficheiro (no Windows o modo é ignorado).
+  mkdirSync(args.stateDir, { recursive: true, mode: 0o700 });
+  writeFileSync(pairingPath(), JSON.stringify(p, null, 2) + "\n", { mode: 0o600 });
+}
+
+function clearPairing(): void {
+  try {
+    rmSync(pairingPath(), { force: true });
+  } catch {
+    // já não existe — é o que se queria
+  }
+  pairing = null;
+}
+
+function pairingValid(p: Pairing | null): p is Pairing {
+  return p !== null && Date.parse(p.expiresAt) > Date.now();
+}
+
 /* ── utilitários ────────────────────────────────────────────────────────── */
 
 function log(message: string): void {
@@ -161,8 +250,22 @@ function replyError(id: JsonRpcId, code: number, message: string): void {
   writeOut({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
+function hmac(key: string, data: string): string {
+  return createHmac("sha256", key).update(data).digest("base64url");
+}
+
+/** Comparação em tempo constante; `false` para tudo o que não for string. */
+function safeEqual(candidate: unknown, expected: string): boolean {
+  if (typeof candidate !== "string") return false;
+  const a = Buffer.from(candidate, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function noTabMessage(): string {
-  return `O 1fluxo não está aberto no browser. Abre ${pairUrl} para ligar.`;
+  return pairingValid(pairing)
+    ? `O 1fluxo não está ligado neste momento. Abre o 1fluxo no browser (${args.appUrl}) com a sessão desbloqueada — a ligação faz-se sozinha. Se não ligar, abre ${pairUrl} para emparelhar de novo.`
+    : `O 1fluxo não está aberto no browser. Abre ${pairUrl} para ligar.`;
 }
 
 function rotateToken(): void {
@@ -174,18 +277,26 @@ function rotateToken(): void {
 /** Prova de que quem responde "paired" conhece o token: HMAC do nonce que o
  *  tab escolheu. O tab verifica antes de confiar. */
 function pairingProof(nonce: string): string {
-  return createHmac("sha256", token).update(nonce).digest("base64url");
+  return hmac(token, nonce);
 }
 
 function tokenMatches(candidate: unknown): boolean {
   if (tokenUsed) return false;
-  if (typeof candidate !== "string") return false;
-  const a = Buffer.from(candidate, "utf8");
-  const b = Buffer.from(token, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
+  return safeEqual(candidate, token);
 }
 
 /* ── lado do cliente MCP (stdin/stdout) ─────────────────────────────────── */
+
+function instructions(): string {
+  return pairingValid(pairing)
+    ? "As tools do 1fluxo ficam disponíveis quando o utilizador tiver o 1fluxo aberto no " +
+        `browser (${args.appUrl}) com a sessão desbloqueada — a ligação faz-se sozinha. ` +
+        "Se uma tool falhar com esse aviso, pede-lhe que abra o 1fluxo; se continuar a " +
+        `falhar, que emparelhe de novo em ${pairUrl}.`
+    : "As tools do 1fluxo só ficam disponíveis depois de o utilizador abrir o " +
+        `1fluxo no browser e autorizar a ligação em ${pairUrl} — se uma tool falhar ` +
+        "com esse aviso, pede-lhe que abra essa página.";
+}
 
 function localInitialize(msg: JsonRpcMessage & { id: JsonRpcId }): object {
   const params = (msg.params ?? {}) as { protocolVersion?: unknown };
@@ -201,10 +312,7 @@ function localInitialize(msg: JsonRpcMessage & { id: JsonRpcId }): object {
       protocolVersion,
       capabilities: { tools: { listChanged: true } },
       serverInfo: { name: "1fluxo", version: VERSION },
-      instructions:
-        "As tools do 1fluxo só ficam disponíveis depois de o utilizador abrir o " +
-        `1fluxo no browser e autorizar a ligação em ${pairUrl} — se uma tool falhar ` +
-        "com esse aviso, pede-lhe que abra essa página.",
+      instructions: instructions(),
     },
   };
 }
@@ -257,25 +365,60 @@ function handleClientMessage(msg: JsonRpcMessage, line: string): void {
 /* ── lado do tab (WebSocket) ────────────────────────────────────────────── */
 
 function onTabMessage(raw: string): void {
-  let msg: JsonRpcMessage;
+  let msg: JsonRpcMessage & { type?: unknown };
   try {
-    msg = JSON.parse(raw) as JsonRpcMessage;
+    msg = JSON.parse(raw) as JsonRpcMessage & { type?: unknown };
   } catch {
     return; // não é JSON — nunca chega ao cliente
   }
   if (!msg || typeof msg !== "object") return;
   // Mensagens de controlo do próprio emparelhamento (sem `jsonrpc`) não são
-  // para o cliente.
+  // para o cliente. «forget» é o utilizador a esquecer este bridge em
+  // Definições: o ficheiro vai-se e a próxima ligação volta a pedir token.
+  if (msg.type === "forget") {
+    clearPairing();
+    log("Emparelhamento esquecido a pedido do 1fluxo.");
+    return;
+  }
   if (msg.jsonrpc !== "2.0") return;
   if (hasId(msg) && msg.method === undefined) pending.delete(idKey(msg.id));
   writeOut(msg);
 }
 
-function attachTab(ws: WebSocket, nonce: string): void {
+type AttachMode = { kind: "pair"; origin: string } | { kind: "resume"; pairing: Pairing };
+
+function attachTab(ws: WebSocket, nonce: string, mode: AttachMode): void {
   tab = ws;
-  tokenUsed = true;
-  log("Tab do 1fluxo ligado.");
-  ws.send(JSON.stringify({ type: "paired", bridge: VERSION, proof: pairingProof(nonce) }));
+  let hello: object;
+  if (mode.kind === "pair") {
+    tokenUsed = true;
+    const now = Date.now();
+    pairing = {
+      id: randomBytes(12).toString("base64url"),
+      secret: randomBytes(32).toString("base64url"),
+      origin: mode.origin,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + PAIRING_TTL_MS).toISOString(),
+    };
+    savePairing(pairing);
+    log(`Tab do 1fluxo emparelhado (válido até ${pairing.expiresAt.slice(0, 10)}).`);
+    // O segredo só passa no fio aqui, uma vez, para o tab o guardar.
+    hello = {
+      type: "paired",
+      bridge: VERSION,
+      proof: pairingProof(nonce),
+      pairing: { id: pairing.id, secret: pairing.secret, expiresAt: pairing.expiresAt },
+    };
+  } else {
+    log("Tab do 1fluxo ligado (emparelhamento retomado).");
+    hello = {
+      type: "paired",
+      bridge: VERSION,
+      proof: hmac(mode.pairing.secret, `bridge:${nonce}`),
+      pairing: { id: mode.pairing.id, expiresAt: mode.pairing.expiresAt },
+    };
+  }
+  ws.send(JSON.stringify(hello));
   ws.on("message", (data) => onTabMessage(data.toString()));
   ws.on("close", () => detachTab(ws));
   ws.on("error", () => detachTab(ws));
@@ -300,15 +443,27 @@ function detachTab(ws: WebSocket): void {
     replyError(
       id,
       ERR_NO_TAB,
-      `O 1fluxo fechou a ligação no browser antes de responder. Abre ${pairUrl} para voltar a ligar.`
+      `O 1fluxo fechou a ligação no browser antes de responder. ${noTabMessage()}`
     );
   }
   pending.clear();
   // O token que emparelhou este tab morre com ele; a URL nova vai para o log.
   rotateToken();
-  log("Token de emparelhamento renovado. Para voltar a ligar:");
-  log(`  ${pairUrl}`);
+  if (pairingValid(pairing)) {
+    log("Volta a ligar sozinho quando o 1fluxo estiver aberto no browser.");
+  } else {
+    log("Token de emparelhamento renovado. Para voltar a ligar:");
+    log(`  ${pairUrl}`);
+  }
 }
+
+type Hello = {
+  type?: unknown;
+  token?: unknown;
+  nonce?: unknown;
+  pairingId?: unknown;
+  proof?: unknown;
+};
 
 function onConnection(ws: WebSocket, origin: string | undefined): void {
   if (!origin || !allowedOrigins.has(origin)) {
@@ -347,14 +502,52 @@ function onConnection(ws: WebSocket, origin: string | undefined): void {
   ws.once("message", (data) => {
     clearTimeout(timer);
     settle();
-    let hello: { type?: unknown; token?: unknown; nonce?: unknown } | null = null;
+    let hello: Hello | null = null;
     try {
-      hello = JSON.parse(data.toString()) as { type?: unknown; token?: unknown; nonce?: unknown };
+      hello = JSON.parse(data.toString()) as Hello;
     } catch {
       hello = null;
     }
-    const nonce = typeof hello?.nonce === "string" && hello.nonce.length >= 16 && hello.nonce.length <= 128 ? hello.nonce : null;
-    if (!hello || hello.type !== "pair" || !nonce || !tokenMatches(hello.token)) {
+    const nonce =
+      typeof hello?.nonce === "string" && hello.nonce.length >= 16 && hello.nonce.length <= 128
+        ? hello.nonce
+        : null;
+    if (!hello || !nonce) {
+      log("Ligação recusada: pedido de emparelhamento inválido.");
+      ws.close(4001, "bad token");
+      return;
+    }
+
+    if (hello.type === "resume") {
+      // Retoma de um emparelhamento guardado: o tab prova conhecer o segredo.
+      if (!pairing) {
+        log("Retoma recusada: não há emparelhamento guardado.");
+        ws.close(4011, "unknown pairing");
+        return;
+      }
+      if (!pairingValid(pairing)) {
+        log("Retoma recusada: o emparelhamento expirou.");
+        clearPairing();
+        ws.close(4010, "pairing expired");
+        return;
+      }
+      if (
+        !safeEqual(hello.pairingId, pairing.id) ||
+        !safeEqual(hello.proof, hmac(pairing.secret, `tab:${nonce}`))
+      ) {
+        log("Retoma recusada: prova de emparelhamento inválida.");
+        ws.close(4011, "bad pairing proof");
+        return;
+      }
+      if (tab) {
+        ws.close(4009, "already paired");
+        return;
+      }
+      attachTab(ws, nonce, { kind: "resume", pairing });
+      return;
+    }
+
+    if (hello.type !== "pair" || !tokenMatches(hello.token)) {
       log("Ligação recusada: token de emparelhamento inválido.");
       ws.close(4001, "bad token");
       return;
@@ -364,7 +557,7 @@ function onConnection(ws: WebSocket, origin: string | undefined): void {
       ws.close(4009, "already paired");
       return;
     }
-    attachTab(ws, nonce);
+    attachTab(ws, nonce, { kind: "pair", origin });
   });
 }
 
@@ -379,6 +572,20 @@ function listen(port: number): Promise<WebSocketServer> {
 }
 
 async function main(): Promise<void> {
+  if (args.forget) {
+    clearPairing();
+    log("Emparelhamento apagado.");
+    process.exit(0);
+  }
+
+  const stored = loadPairing();
+  if (stored && !pairingValid(stored)) {
+    clearPairing();
+    log("O emparelhamento guardado expirou; apagado.");
+  } else {
+    pairing = stored;
+  }
+
   let wss: WebSocketServer;
   try {
     wss = await listen(args.port);
@@ -396,7 +603,13 @@ async function main(): Promise<void> {
   wss.on("error", (err) => log(`Erro no servidor WebSocket: ${err.message}`));
 
   log(`v${VERSION} à escuta em ws://127.0.0.1:${port}`);
-  log("Abre no browser, com a sessão do 1fluxo desbloqueada:");
+  if (pairingValid(pairing)) {
+    log(`Emparelhamento válido até ${pairing.expiresAt.slice(0, 10)}.`);
+    log(`Abre o 1fluxo no browser (${args.appUrl}) com a sessão desbloqueada — a ligação faz-se sozinha.`);
+    log("Para emparelhar de novo, se for preciso:");
+  } else {
+    log("Abre no browser, com a sessão do 1fluxo desbloqueada:");
+  }
   log(`  ${pairUrl}`);
 
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
