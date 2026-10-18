@@ -259,7 +259,7 @@ fn run_tray(config: Config) {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Arranque com o sistema ligado por defeito . Só
+            // Arranque com o sistema ligado por defeito. Só
             // em builds de release, e `FLUXO_BRIDGE_NO_AUTOSTART=1` desliga-o (testes).
             if first_run && !cfg!(debug_assertions) && std::env::var_os("FLUXO_BRIDGE_NO_AUTOSTART").is_none() {
                 let _ = app.autolaunch().enable();

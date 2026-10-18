@@ -211,7 +211,7 @@ const pending = new Map<string, { id: JsonRpcId; method: string }>();
 type Queued = { line: string; msg: JsonRpcMessage; timer: NodeJS.Timeout };
 const queue: Queued[] = [];
 
-/* ── emparelhamento persistente ─────────────────────────────── */
+/* ── emparelhamento persistente ──────────────────────────────────────────── */
 
 type Pairing = {
   id: string;
