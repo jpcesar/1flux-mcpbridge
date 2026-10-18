@@ -96,7 +96,7 @@ pergunta de novo. Nas vezes seguintes basta ter o 1fluxo aberto no browser.
 | Flag | Defeito | Para quê |
 | --- | --- | --- |
 | `--port N` | `17337` | porta do WebSocket local; ocupada → escolhe outra |
-| `--app-url URL` | `http://localhost:3000` | onde o 1fluxo está a correr (entra na URL de emparelhamento e na lista de origens) |
+| `--app-url URL` | `https://1fluxo.com` | onde o 1fluxo está a correr (entra na URL de emparelhamento e na lista de origens) |
 | `--origin URL` | — | origem adicional autorizada a emparelhar (repetível) |
 | `--state-dir DIR` | `~/.1fluxo` | onde fica `bridge-pairing.json` |
 | `--forget` | — | apaga o emparelhamento guardado e termina |

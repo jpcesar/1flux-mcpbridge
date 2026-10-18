@@ -51,7 +51,7 @@ const DEFAULT_PORT = 17337;
 /** Com a porta ocupada tenta-se as seguintes, por esta ordem, para o tab do
  *  1fluxo as poder varrer (espelha `BRIDGE_PORT_RANGE` na web app). */
 const PORT_FALLBACKS = 10;
-const DEFAULT_APP_URL = "http://localhost:3000";
+const DEFAULT_APP_URL = "https://1fluxo.com";
 /** Origens do web app que podem emparelhar. `--origin` acrescenta outras; a
  *  origem de `--app-url` entra sempre. */
 const DEFAULT_ORIGINS = [
