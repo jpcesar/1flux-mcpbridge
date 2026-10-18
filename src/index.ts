@@ -115,7 +115,7 @@ function usage(): string {
     "  --no-open       não abrir o browser sozinho quando um pedido chega sem tab ligado",
     "",
     "Lançado por um cliente MCP via stdio, p. ex.:",
-    "  claude mcp add 1flux -- node <caminho>/packages/bridge/dist/index.js",
+    "  claude mcp add 1flux -- node <caminho>/dist/index.js",
   ].join("\n");
 }
 
@@ -180,8 +180,9 @@ let pendingConnections = 0;
 const MAX_PENDING = 3;
 
 /**
- * Cópia das tools da web app (`packages/bridge/tools.json`, gerada e
- * verificada por `src/lib/mcp/tools-sync.test.ts`). Serve o `tools/list`
+ * Cópia das tools da web app (`tools.json`, copiada de
+ * `src/lib/mcp/bridge-tools.json` do repo 1flux-app, onde é verificada por
+ * `tools-sync.test.ts`). Serve o `tools/list`
  * quando não há tab: senão o cliente arranca sem tools e nunca chega a fazer
  * a chamada que abre o browser. Com tab, é o tab que responde.
  */

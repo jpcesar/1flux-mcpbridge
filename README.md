@@ -68,7 +68,7 @@ npm run pack:mcpb
 Compila, monta `dist-mcpb/stage/` só com `manifest.json`, `dist/`, o
 `package.json` de produção, o `node_modules` de runtime (`ws`) e o ícone, faz o
 zip `dist-mcpb/1fluxo-bridge-<versão>.mcpb` (com o `zip` do sistema) e copia-o
-para `public/downloads/` da web app, de onde Definições → Ligação a IA o liga.
+para `public/downloads/` do repo 1flux-app, de onde Definições → Ligação a IA o liga.
 A versão do `manifest.json` tem de bater com a do `package.json` (e com
 `src/lib/mcp/bridge-release.ts` na web app).
 
@@ -80,11 +80,11 @@ apontar a outro ambiente do 1fluxo.
 ## Uso (dev, por caminho local)
 
 ```bash
-cd packages/bridge && npm ci && npm run build
+npm ci && npm run build
 ```
 
 ```bash
-claude mcp add 1fluxo -- node /caminho/para/1flux-app/packages/bridge/dist/index.js --app-url http://localhost:3000
+claude mcp add 1fluxo -- node /caminho/para/1flux-mcpbridge/dist/index.js --app-url http://localhost:3000
 ```
 
 Depois, no Claude Code, a primeira pergunta sobre o 1fluxo devolve a URL de
