@@ -61,7 +61,9 @@ jobs:
       - name: SHA256SUMS
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+      # Os atestados só funcionam em repos públicos (ou no GitHub Enterprise).
       - uses: actions/attest-build-provenance@v2
+        if: ${{ !github.event.repository.private }}
         with:
           subject-path: dist/*.zip
       - name: Release
