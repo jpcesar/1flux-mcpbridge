@@ -21,6 +21,10 @@ jobs:
     defaults:
       run:
         working-directory: tray
+    env:
+      # Assinatura e notarização macOS: só com os segredos definidos (ver README,
+      # «Assinatura»). Sem eles a release sai com assinatura ad-hoc e um aviso.
+      HAS_MACOS_SIGNING: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.APPLE_API_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,8 +38,36 @@ jobs:
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME ≠ versão v$version"; exit 1; }
       - name: Testes
         run: cargo test --workspace
+      - name: Certificado Developer ID e chave da notarização
+        if: runner.os == 'macOS' && env.HAS_MACOS_SIGNING == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          # Keychain temporário só para este job; o runner é descartado no fim.
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(openssl rand -hex 24)"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+      - name: Sem assinatura Developer ID
+        if: runner.os == 'macOS' && env.HAS_MACOS_SIGNING != 'true'
+        run: echo "::warning::Release macOS sem assinatura Developer ID nem notarização — o Gatekeeper vai bloquear."
       - name: Pacote macOS
         if: runner.os == 'macOS'
+        env:
+          MACOS_SIGN_IDENTITY: ${{ env.HAS_MACOS_SIGNING == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/pack-macos.sh
       - name: Pacote Windows
         if: runner.os == 'Windows'

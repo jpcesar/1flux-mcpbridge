@@ -49,9 +49,10 @@ Funciona com qualquer cliente MCP.
 4. Faz uma pergunta. Na primeira vez abre-se o browser para carregares em
    **Permitir**; a ligação mantém-se durante 30 dias.
 
-**Primeira abertura.** Os executáveis não são assinados (não há conta Apple Developer
-nem certificado Windows). O macOS bloqueia-os: botão direito → Abrir, ou
-Definições do Sistema → Privacidade e segurança → «Abrir mesmo assim». O Windows
+**Primeira abertura.** Enquanto os executáveis não saem assinados (ver
+[Assinatura](#assinatura)), o macOS bloqueia-os: Definições do Sistema →
+Privacidade e segurança → «Abrir mesmo assim» (no macOS 15 ou mais recente o
+botão direito → Abrir já não chega). O Windows
 avisa «editor desconhecido»: Mais informações → Executar mesmo assim. Por isso o
 código é público e os builds saem do GitHub Actions; confirma o ficheiro com o
 `SHA256SUMS` da Release:
@@ -83,6 +84,31 @@ scripts/pack-macos.sh                        # dist/1fluxo-bridge-macos.zip
 Mais em [`tray/README.md`](tray/README.md). O bridge original em TypeScript, que a
 extensão `.mcpb` ainda usa, está na raiz (`src/`, `npm run build`, `npm test`) e
 descrito em [`docs/bridge-typescript.md`](docs/bridge-typescript.md).
+
+## Assinatura
+
+A release (`.github/workflows/release.yml`) assina e notariza a app de macOS
+quando estes segredos existem no repo (Settings → Secrets and variables →
+Actions). Sem eles a release sai com assinatura ad-hoc e um aviso no workflow.
+
+| Segredo | O que é |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Certificado **Developer ID Application** exportado do Keychain em `.p12`, em base64 (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PASSWORD` | A palavra-passe com que o `.p12` foi exportado |
+| `MACOS_SIGN_IDENTITY` | O nome do certificado, p. ex. `Developer ID Application: Nome (TEAMID)` |
+| `APPLE_API_KEY_P8` | Chave da App Store Connect API (`.p8`, papel *Developer*), em base64 |
+| `APPLE_API_KEY_ID` | O *Key ID* dessa chave |
+| `APPLE_API_ISSUER_ID` | O *Issuer ID* da equipa |
+
+O `tray/scripts/pack-macos.sh` assina com hardened runtime e timestamp, envia o
+zip ao `notarytool`, agrafa o ticket à app e volta a fazer o zip. Para confirmar
+uma app descarregada:
+
+```bash
+spctl --assess --type execute --verbose=2 "1fluxo Bridge.app"   # accepted, source=Notarized Developer ID
+```
+
+A assinatura do executável de Windows ainda não está feita.
 
 ## Licença
 

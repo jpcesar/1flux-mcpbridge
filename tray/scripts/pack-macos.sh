@@ -1,8 +1,14 @@
 #!/bin/sh
-# Empacota "1fluxo Bridge.app" (sem instalador, sem notarização) e um zip para descarregar.
+# Empacota "1fluxo Bridge.app" (sem instalador) e um zip para descarregar.
 # Uso: tray/scripts/pack-macos.sh   (a partir de qualquer pasta)
-# Sem conta Apple Developer: a app leva só uma assinatura ad-hoc, por isso na primeira
-# abertura o Gatekeeper pede «Abrir mesmo assim» (Definições do Sistema → Privacidade).
+#
+# Assinatura:
+# · Com MACOS_SIGN_IDENTITY ("Developer ID Application: Nome (TEAMID)", no keychain):
+#   assina com hardened runtime e timestamp.
+# · Com NOTARY_KEY_PATH, NOTARY_KEY_ID e NOTARY_ISSUER_ID (chave da App Store Connect
+#   API): notariza na Apple, agrafa o ticket à app e volta a fazer o zip.
+# · Sem nada disto (build local): assinatura ad-hoc, e na primeira abertura o
+#   Gatekeeper pede «Abrir mesmo assim» (Definições do Sistema → Privacidade).
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
@@ -42,6 +48,43 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 && echo "assinatura ad-hoc aplicada"
-(cd "$OUT" && rm -f 1fluxo-bridge-macos.zip && ditto -c -k --keepParent "1fluxo Bridge.app" 1fluxo-bridge-macos.zip)
-echo "pronto: $OUT/1fluxo-bridge-macos.zip"
+ZIP="$OUT/1fluxo-bridge-macos.zip"
+make_zip() {
+  (cd "$OUT" && rm -f "$ZIP" && ditto -c -k --keepParent "1fluxo Bridge.app" "$ZIP")
+}
+
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  # Um só executável no bundle: assinar o bundle assina-o (sem --deep, que a
+  # Apple desaconselha). Hardened runtime e timestamp são obrigatórios para notarizar.
+  codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP"
+  codesign --verify --strict --verbose=2 "$APP"
+  echo "assinada com Developer ID"
+else
+  codesign --force --sign - "$APP" >/dev/null 2>&1 && echo "assinatura ad-hoc aplicada"
+fi
+make_zip
+
+if [ -n "${NOTARY_KEY_PATH:-}" ]; then
+  : "${NOTARY_KEY_ID:?falta NOTARY_KEY_ID}" "${NOTARY_ISSUER_ID:?falta NOTARY_ISSUER_ID}"
+  [ -n "${MACOS_SIGN_IDENTITY:-}" ] || { echo "notarizar exige MACOS_SIGN_IDENTITY"; exit 1; }
+  # O notarytool sai com 0 mesmo quando a Apple recusa: confirma-se o estado.
+  RESULT="$(xcrun notarytool submit "$ZIP" --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" \
+    --issuer "$NOTARY_ISSUER_ID" --wait --output-format json)"
+  echo "$RESULT"
+  case "$RESULT" in
+    *'"status":"Accepted"'*) ;;
+    *)
+      ID="$(printf '%s' "$RESULT" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+      [ -n "$ID" ] && xcrun notarytool log "$ID" --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" \
+        --issuer "$NOTARY_ISSUER_ID" || true
+      echo "a notarização falhou"; exit 1
+      ;;
+  esac
+  # O ticket fica dentro da app: abre sem rede na primeira vez.
+  xcrun stapler staple "$APP"
+  spctl --assess --type execute --verbose=2 "$APP"
+  make_zip
+  echo "notarizada e agrafada"
+fi
+
+echo "pronto: $ZIP"
