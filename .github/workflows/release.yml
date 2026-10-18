@@ -1,0 +1,72 @@
+name: release
+
+# Ao criar uma tag `vX.Y.Z` compila a app de tray em macOS e Windows, junta os
+# pacotes e o SHA256SUMS numa Release e atesta a origem dos ficheiros (quem os
+# descarrega pode confirmar que saíram deste repo e deste workflow).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tray
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tray
+      - name: A tag tem de bater com a versão
+        shell: bash
+        run: |
+          version="$(grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)"
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME ≠ versão v$version"; exit 1; }
+      - name: Testes
+        run: cargo test --workspace
+      - name: Pacote macOS
+        if: runner.os == 'macOS'
+        run: scripts/pack-macos.sh
+      - name: Pacote Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release -p fluxo-bridge-app
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Force -Path target/release/1fluxo-bridge.exe -DestinationPath dist/1fluxo-bridge-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacote-${{ runner.os }}
+          path: tray/dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.zip
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

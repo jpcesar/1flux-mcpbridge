@@ -46,5 +46,5 @@
     "runtimes": { "node": ">=20.0.0" }
   },
   "keywords": ["finanças", "1fluxo", "zero-knowledge"],
-  "license": "UNLICENSED"
+  "license": "FSL-1.1-MIT"
 }

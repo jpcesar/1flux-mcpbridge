@@ -487,7 +487,7 @@ impl Hub {
     }
 
     /// O token serve um emparelhamento; depois disso só um token novo entra
-    ///.
+    /// (um token reutilizável deixava o emparelhamento ser repetido).
     pub fn token_matches(&self, candidate: &str) -> bool {
         let g = self.lock();
         !g.token_used && pairing::safe_eq(candidate, &g.token)

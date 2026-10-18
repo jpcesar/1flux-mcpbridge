@@ -171,7 +171,7 @@ const allowedOrigins = new Set<string>([
 ]);
 let token = randomBytes(32).toString("base64url");
 /** O token serve um emparelhamento; depois disso só um token novo entra
- *. Renova-se quando o tab se desliga. */
+ *  (um token reutilizável deixava o emparelhamento ser repetido). Renova-se quando o tab se desliga. */
 let tokenUsed = false;
 let pairPort = 0;
 /** Ligações ainda por emparelhar; sem tecto qualquer processo local enchia
@@ -352,7 +352,7 @@ function rotateToken(): void {
 }
 
 /** Prova de que quem responde "paired" conhece o token: HMAC do nonce que o
- *  tab escolheu. O tab verifica antes de confiar. */
+ *  tab escolheu (sem isto qualquer processo local podia fingir ser o bridge). O tab verifica antes de confiar. */
 function pairingProof(nonce: string): string {
   return hmac(token, nonce);
 }

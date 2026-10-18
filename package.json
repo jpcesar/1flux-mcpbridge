@@ -26,5 +26,6 @@
     "@types/node": "^22.14.0",
     "@types/ws": "^8.5.13",
     "typescript": "^5.8.0"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }
