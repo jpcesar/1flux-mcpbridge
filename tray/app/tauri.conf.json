@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "1fluxo Bridge",
+  "version": "1.0.0",
+  "identifier": "com.1fluxo.bridge",
+  "build": { "frontendDist": "frontend" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.png", "icons/icon.ico"] }
+}

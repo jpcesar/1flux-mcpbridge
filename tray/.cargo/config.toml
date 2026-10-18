@@ -1,0 +1,4 @@
+# Cross-compilação para Windows a partir do macOS: `brew install mingw-w64`.
+# Em CI (windows-latest) usa-se o alvo MSVC nativo e isto não se aplica.
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"

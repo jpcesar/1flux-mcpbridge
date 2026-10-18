@@ -1,0 +1,44 @@
+name: tray
+
+# Compila e testa a app de tray (tray/) em macOS e Windows, e deixa os pacotes como artefactos.
+on:
+  push:
+    paths: ["tray/**", "tools.json", ".github/workflows/tray.yml"]
+  pull_request:
+    paths: ["tray/**", "tools.json", ".github/workflows/tray.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tray
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tray
+      - name: Testes
+        run: cargo test --workspace
+      - name: Build de release
+        run: cargo build --release -p fluxo-bridge-app
+      - name: Pacote macOS
+        if: runner.os == 'macOS'
+        run: scripts/pack-macos.sh
+      - name: Pacote Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Force -Path target/release/1fluxo-bridge.exe -DestinationPath dist/1fluxo-bridge-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 1fluxo-bridge-${{ runner.os }}
+          path: tray/dist/*.zip
+          if-no-files-found: error
