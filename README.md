@@ -9,9 +9,9 @@ decifrar. Aqui, quem decifra és tu, no teu browser, com a sessão que já tens
 aberta; este programa só faz a ponte entre o assistente e esse separador.
 
 ```
-Claude Code, Cursor, VS Code ──HTTP + token──┐
-Claude Desktop ── 1fluxo-bridge --stdio ─────┤→ Bridge ──WebSocket local──→ separador do 1fluxo
-                                             │  (no teu computador)         (decifra e responde)
+Claude Desktop (Chat) ── 1fluxo-bridge --stdio ──┐
+Claude Code (CLI e Code) ─ 1fluxo-bridge --stdio ─┤→ app de tray ──WebSocket local──→ separador do 1fluxo
+Cursor, VS Code ─────────── HTTP + token ────────┘  (no teu computador)               (decifra e responde)
 ```
 
 * Só fala com o `127.0.0.1`. Não abre ligações para a rede.
@@ -22,30 +22,38 @@ Claude Desktop ── 1fluxo-bridge --stdio ─────┤→ Bridge ──W
 
 ## Instalar
 
-Há duas formas, escolhe uma.
+Há duas formas, escolhe uma. Não uses as duas ao mesmo tempo: cada uma tem o seu
+bridge e os dois disputariam o separador do 1fluxo.
 
-### Opção 1 — Claude, via extensão
+### Opção 1 — Só o Claude Desktop, via extensão
 
-Para o Claude Desktop. Descarrega a extensão `.mcpb` em Definições → Ligação a IA
-no 1fluxo e abre o ficheiro com o Claude Desktop.
+Não instala mais nada: descarrega a extensão `.mcpb` em Definições → Ligação a IA
+no 1fluxo e abre o ficheiro com o Claude Desktop. Funciona sozinha, sem a app da Opção 2.
 
-### Opção 2 — Executável local (bridge MCP)
+### Opção 2 — App de tray (Claude Desktop, Claude Code e outros clientes)
 
-Funciona com qualquer cliente MCP.
+Uma app pequena que fica a correr e serve todos os clientes MCP do computador.
 
 1. Descarrega o ficheiro da tua plataforma em [Releases](../../releases/latest):
    `1fluxo-bridge-macos.zip` ou `1fluxo-bridge-windows.zip`. Não há instalador:
-   descomprime e abre.
+   descomprime e abre. No macOS, move primeiro a app para a pasta Aplicações (o
+   caminho dela fica guardado na configuração dos clientes).
 2. Aparece um ícone no tray (Windows) ou na barra de menus (macOS). Dali: ligar e
    desligar (ON/OFF), ver o estado, abrir o 1fluxo e sair.
-3. No menu, **Copiar endereço MCP** ou **Copiar comando para o Claude Code**, e cola
-   no teu cliente:
+3. Liga o teu cliente com um clique no menu:
 
-   ```bash
-   claude mcp add --transport http 1fluxo http://127.0.0.1:17350/mcp \
-     --header "Authorization: Bearer <o teu token>"
-   ```
+   | Cliente | Item do menu | Depois |
+   | --- | --- | --- |
+   | **Claude Desktop** (separador Chat) | **Ligar ao Claude Desktop** | Fecha o Claude Desktop por completo (⌘Q no macOS) e abre-o outra vez |
+   | **Claude Code** (CLI e separador Code do Claude Desktop) | **Ligar ao Claude Code** | Abre uma sessão nova |
+   | Cursor, VS Code e outros por HTTP | **Copiar endereço MCP** | Cola o endereço (já leva o token) no cliente |
 
+   Cada item diz-te se a ligação já estava feita, por isso podes repeti-los sem
+   risco. No Claude Desktop só se acrescenta a entrada `1fluxo` ao
+   `claude_desktop_config.json` (o resto fica como estava e fica uma cópia ao lado);
+   no Claude Code corre-se o `claude mcp add` por ti, ou, se o `claude` não for
+   encontrado, copia-se o comando para colares no terminal. A app tem de estar
+   aberta para o assistente ter acesso aos dados.
 4. Faz uma pergunta. Na primeira vez abre-se o browser para carregares em
    **Permitir**; a ligação mantém-se durante 30 dias.
 

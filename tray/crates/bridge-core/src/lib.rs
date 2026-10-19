@@ -5,6 +5,8 @@
 //! cliente MCP que o vai receber de qualquer maneira; só fala por loopback e
 //! não escreve conteúdo em logs.
 
+pub mod claude_code;
+pub mod claude_desktop;
 pub mod cli;
 pub mod http;
 pub mod hub;
