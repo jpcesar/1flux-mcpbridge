@@ -9,7 +9,7 @@
 // continuam a funcionar para o modo `--stdio`.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
-use bridge_core::{cli, endpoint_url, hub::log, pairing, shim, Config, Running, Status};
+use bridge_core::{claude_desktop, cli, endpoint_url, hub::log, pairing, shim, Config, Running, Status};
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -155,6 +155,65 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
+/// Diálogo nativo com uma mensagem (a app não tem janelas). Falhar só tira a
+/// comodidade; o texto vai sempre também para o log.
+fn notify(text: &str) {
+    log(text);
+    let spawned = if cfg!(target_os = "macos") {
+        Command::new("osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "display dialog (item 1 of argv) with title \"1fluxo Bridge\" buttons {\"OK\"} default button \"OK\"",
+                "-e",
+                "end run",
+                text,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    } else {
+        let mut c = Command::new("powershell");
+        c.args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName PresentationFramework; [void][System.Windows.MessageBox]::Show($env:FLUXO_MSG, '1fluxo Bridge')",
+        ])
+        .env("FLUXO_MSG", text)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        c.spawn()
+    };
+    if let Ok(mut child) = spawned {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
+/// «Ligar ao Claude Desktop»: escreve a entrada `1fluxo` na configuração dele.
+fn connect_claude_desktop() {
+    let (Some(path), Ok(exe)) = (claude_desktop::config_path(), std::env::current_exe()) else {
+        notify("Não encontrei a configuração do Claude Desktop neste sistema.");
+        return;
+    };
+    notify(&match claude_desktop::install(&path, &exe) {
+        Ok(claude_desktop::Outcome::Unchanged) => {
+            "O Claude Desktop já estava ligado ao 1fluxo. Se não vires as ferramentas, fecha-o por completo e abre-o outra vez.".to_string()
+        }
+        Ok(_) => "Pronto. Fecha o Claude Desktop por completo (⌘Q no macOS) e abre-o outra vez: o 1fluxo fica disponível no Chat. Mantém esta app aberta e o 1fluxo aberto no browser.".to_string(),
+        Err(e) => e.to_string(),
+    });
+}
+
 async fn current(shared: &Arc<Shared>) -> Option<(u16, String)> {
     let guard = shared.running.lock().await;
     let r = guard.as_ref()?;
@@ -194,6 +253,9 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
                     ));
                 }
             }
+            "claude_desktop" => {
+                let _ = tauri::async_runtime::spawn_blocking(connect_claude_desktop).await;
+            }
             "autostart" => {
                 let launcher = app.autolaunch();
                 let enabled = launcher.is_enabled().unwrap_or(false);
@@ -222,6 +284,7 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
     let open = MenuItem::with_id(app, "open", "Abrir o 1fluxo", false, None::<&str>)?;
     let copy_url = MenuItem::with_id(app, "copy_url", "Copiar endereço MCP", false, None::<&str>)?;
     let copy_cmd = MenuItem::with_id(app, "copy_cmd", "Copiar comando para o Claude Code", false, None::<&str>)?;
+    let claude_desktop = MenuItem::with_id(app, "claude_desktop", "Ligar ao Claude Desktop", true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
         "autostart",
@@ -235,7 +298,7 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
     let sep = || PredefinedMenuItem::separator(app);
     let menu = Menu::with_items(
         app,
-        &[&status, &sep()?, &toggle, &open, &copy_url, &copy_cmd, &sep()?, &autostart, &forget, &sep()?, &quit],
+        &[&status, &sep()?, &toggle, &open, &copy_url, &copy_cmd, &claude_desktop, &sep()?, &autostart, &forget, &sep()?, &quit],
     )?;
     let tray = TrayIconBuilder::with_id("main")
         .icon(icon_for(Look::Off))

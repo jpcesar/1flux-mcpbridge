@@ -33,10 +33,17 @@ minuto) e espera até 60 s pelo tab, como o bridge em TypeScript.
 * **Claude Code, Cursor, VS Code**: copiar o comando/endereço no menu do tray. O token vai
   no header `Authorization: Bearer …` (preferido) ou no caminho (`/mcp/<token>`), para os
   clientes que não deixam configurar headers — nesse caso fica em ficheiros de configuração e logs.
-* **Claude Desktop**: só lança processos por stdio e não aceita servidores HTTP locais.
-  Usar o mesmo executável com `--stdio` (por exemplo dentro de um `.mcpb` com
-  `server.type: "binary"`): reencaminha stdin/stdout para o tray. Com o tray em baixo
-  responde localmente ao `initialize`, `ping` e `tools/list` e falha as tools com um erro legível.
+* **Claude Desktop** (separador Chat): só lança processos por stdio e não aceita servidores
+  HTTP locais. No menu, **Ligar ao Claude Desktop** acrescenta a entrada `1fluxo` ao
+  `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`; Windows:
+  `%APPDATA%\Claude\`, ou a pasta virtualizada da versão da Store). A entrada lança este
+  mesmo executável com `--stdio` e não leva token: o shim lê a porta e o token do estado local.
+  Só mexe em `mcpServers.1fluxo` (o resto fica como estava), recusa JSON ilegível, guarda uma
+  cópia (`claude_desktop_config.json.1fluxo.bak`) antes da primeira alteração e escreve de
+  forma atómica. Recusa-se a correr de uma app «translocada» (aberta a partir das
+  Transferências): move-a primeiro para Aplicações. Depois, fechar o Claude Desktop por
+  completo e abri-lo outra vez. A app tem de estar aberta; com ela em baixo o shim responde
+  localmente ao `initialize`, `ping` e `tools/list` e falha as tools com um erro legível.
 
 ## Segurança do endpoint
 
@@ -49,7 +56,7 @@ clientes poderem usar o mesmo bridge sem as respostas se trocarem.
 
 ```bash
 cd tray
-cargo test                       # 14 testes: emparelhamento, endpoint, remapeamento de ids
+cargo test                       # 19 testes: emparelhamento, endpoint, remapeamento de ids, config do Claude Desktop
 cargo run -p bridge-core --bin 1fluxo-bridge-headless -- --app-url http://localhost:3000
 cargo run -p fluxo-bridge-app -- --app-url http://localhost:3000     # com tray
 scripts/pack-macos.sh            # dist/1fluxo-bridge-macos.zip (.app com assinatura ad-hoc)
