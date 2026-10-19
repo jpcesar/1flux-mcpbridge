@@ -33,7 +33,7 @@ minuto) e espera até 60 s pelo tab, como o bridge em TypeScript.
 
 * **Claude Code** (CLI e separador Code do Claude Desktop, que partilham o `~/.claude.json`):
   **Ligar ao Claude Code** corre `claude mcp add --scope user 1fluxo -- <esta app> --stdio`
-  (primeiro um `claude mcp remove` da mesma entrada, se existir). Não edita o `~/.claude.json`
+  (primeiro vê se já está registado e, se sim, diz «já estava ligado» e não muda nada; senão faz um `claude mcp remove` da mesma entrada, se existir). Não edita o `~/.claude.json`
   à mão. Procura o `claude` nos sítios habituais e no `PATH` de um shell de login; se não o
   encontrar, ou ele recusar, copia o comando para colar no terminal. Só vale para sessões novas.
   Uma entrada `1fluxo` registada antes num projecto (âmbito local) continua a ter prioridade nesse projecto.

@@ -138,6 +138,29 @@ fn run_claude(claude: &Path, args: &[OsString]) -> std::io::Result<(bool, String
     Ok((ok, format!("{}{}", out.trim(), err.trim())))
 }
 
+/// Onde o Claude Code guarda o estado: `$CLAUDE_CONFIG_DIR/.claude.json` ou `~/.claude.json`.
+fn state_file() -> Option<PathBuf> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(d) if !d.is_empty() => Some(PathBuf::from(d).join(".claude.json")),
+        _ => home().map(|h| h.join(".claude.json")),
+    }
+}
+
+/// O servidor `1fluxo` já está registado no âmbito do utilizador, a apontar para
+/// `exe`? Só lê (e só olha para essa entrada); qualquer dúvida é «não».
+pub fn is_configured(exe: &Path) -> bool {
+    state_file().is_some_and(|f| is_configured_in(&f, exe))
+}
+
+fn is_configured_in(file: &Path, exe: &Path) -> bool {
+    let Ok(raw) = std::fs::read_to_string(file) else { return false };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return false };
+    let Some(e) = v.get("mcpServers").and_then(|m| m.get(SERVER_NAME)) else { return false };
+    e.get("command").and_then(|c| c.as_str()) == exe.to_str()
+        && e.get("args") == Some(&serde_json::json!(["--stdio"]))
+        && e.get("type").and_then(|t| t.as_str()).is_none_or(|t| t == "stdio")
+}
+
 /// Regista (ou volta a registar) o servidor `1fluxo` no âmbito do utilizador.
 /// Só mexe na entrada com este nome nesse âmbito; as dos projectos ficam como estão.
 pub fn install(claude: &Path, exe: &Path) -> Result<(), String> {
@@ -150,11 +173,14 @@ pub fn install(claude: &Path, exe: &Path) -> Result<(), String> {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, os::unix::fs::PermissionsExt};
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(unix)]
     /// Um «claude» de mentira que regista os argumentos de cada chamada.
     fn fake_claude(dir: &Path, fail_add: bool) -> PathBuf {
         let path = dir.join("claude");
@@ -169,6 +195,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     #[test]
     fn manual_command_quotes_the_path() {
         let exe = PathBuf::from("/Applications/1fluxo Bridge.app/Contents/MacOS/1fluxo-bridge");
@@ -180,6 +207,22 @@ mod tests {
     }
 
     #[test]
+    fn detects_an_existing_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        let exe = Path::new("/Applications/1fluxo Bridge.app/x");
+        assert!(!is_configured_in(&file, exe), "sem ficheiro");
+        fs::write(&file, r#"{"mcpServers":{"1fluxo":{"type":"stdio","command":"/Applications/1fluxo Bridge.app/x","args":["--stdio"],"env":{}}}}"#).unwrap();
+        assert!(is_configured_in(&file, exe));
+        assert!(!is_configured_in(&file, Path::new("/outro/caminho")), "caminho diferente");
+        fs::write(&file, r#"{"mcpServers":{"1fluxo":{"type":"http","url":"http://127.0.0.1:17350/mcp"}}}"#).unwrap();
+        assert!(!is_configured_in(&file, exe), "entrada HTTP antiga");
+        fs::write(&file, "isto não é json").unwrap();
+        assert!(!is_configured_in(&file, exe));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn install_removes_then_adds_with_user_scope() {
         let dir = tempfile::tempdir().unwrap();
         let claude = fake_claude(dir.path(), false);
@@ -190,6 +233,7 @@ mod tests {
         assert_eq!(lines[1], "mcp add --scope user 1fluxo -- /Applications/1fluxo Bridge.app/x --stdio");
     }
 
+    #[cfg(unix)]
     #[test]
     fn install_reports_the_claude_error() {
         let dir = tempfile::tempdir().unwrap();

@@ -224,6 +224,10 @@ fn connect_claude_code() {
         notify(&claude_desktop::Error::UnstableExe(exe).to_string());
         return;
     }
+    if claude_code::is_configured(&exe) {
+        notify("O Claude Code já estava ligado ao 1fluxo, não mudei nada. Se não vires as ferramentas, abre uma sessão nova.");
+        return;
+    }
     let manual = claude_code::manual_command(&exe);
     let fallback = |why: &str| {
         copy_to_clipboard(&manual);
