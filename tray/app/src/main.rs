@@ -9,7 +9,7 @@
 // continuam a funcionar para o modo `--stdio`.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
-use bridge_core::{claude_desktop, cli, endpoint_url, hub::log, pairing, shim, Config, Running, Status};
+use bridge_core::{claude_code, claude_desktop, cli, endpoint_url, hub::log, pairing, shim, Config, Running, Status};
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -70,7 +70,6 @@ struct Ui {
     toggle: CheckMenuItem<tauri::Wry>,
     open: MenuItem<tauri::Wry>,
     copy_url: MenuItem<tauri::Wry>,
-    copy_cmd: MenuItem<tauri::Wry>,
 }
 
 impl Ui {
@@ -89,7 +88,7 @@ impl Ui {
         };
         let _ = self.status.set_text(&text);
         let _ = self.toggle.set_checked(s.running);
-        for item in [&self.open, &self.copy_url, &self.copy_cmd] {
+        for item in [&self.open, &self.copy_url] {
             let _ = item.set_enabled(s.running);
         }
         let _ = self.tray.set_icon(Some(icon_for(look)));
@@ -214,6 +213,31 @@ fn connect_claude_desktop() {
     });
 }
 
+/// «Ligar ao Claude Code»: regista o servidor com o `claude mcp add`; se não der,
+/// copia o comando para colar no terminal.
+fn connect_claude_code() {
+    let Ok(exe) = std::env::current_exe() else {
+        notify("Não consegui saber onde esta app está.");
+        return;
+    };
+    if !claude_desktop::exe_is_stable(&exe) {
+        notify(&claude_desktop::Error::UnstableExe(exe).to_string());
+        return;
+    }
+    let manual = claude_code::manual_command(&exe);
+    let fallback = |why: &str| {
+        copy_to_clipboard(&manual);
+        notify(&format!("{why} Copiei o comando: cola-o num terminal e carrega em Enter.\n\n{manual}"));
+    };
+    match claude_code::find_claude() {
+        None => fallback("Não encontrei o Claude Code neste computador."),
+        Some(claude) => match claude_code::install(&claude, &exe) {
+            Ok(()) => notify("Pronto. Abre uma sessão nova do Claude Code (as que já estão abertas não veem a ligação) e pergunta pelas tuas finanças. Mantém esta app aberta e o 1fluxo aberto no browser."),
+            Err(e) => fallback(&format!("O Claude Code recusou o registo ({e}).")),
+        },
+    }
+}
+
 async fn current(shared: &Arc<Shared>) -> Option<(u16, String)> {
     let guard = shared.running.lock().await;
     let r = guard.as_ref()?;
@@ -245,13 +269,8 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
                     copy_to_clipboard(&format!("{}/{token}", endpoint_url(port)));
                 }
             }
-            "copy_cmd" => {
-                if let Some((port, token)) = current(&shared).await {
-                    copy_to_clipboard(&format!(
-                        "claude mcp add --transport http 1fluxo {} --header \"Authorization: Bearer {token}\"",
-                        endpoint_url(port)
-                    ));
-                }
+            "claude_code" => {
+                let _ = tauri::async_runtime::spawn_blocking(connect_claude_code).await;
             }
             "claude_desktop" => {
                 let _ = tauri::async_runtime::spawn_blocking(connect_claude_desktop).await;
@@ -283,8 +302,8 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
     let toggle = CheckMenuItem::with_id(app, "toggle", "Ligado", true, false, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Abrir o 1fluxo", false, None::<&str>)?;
     let copy_url = MenuItem::with_id(app, "copy_url", "Copiar endereço MCP", false, None::<&str>)?;
-    let copy_cmd = MenuItem::with_id(app, "copy_cmd", "Copiar comando para o Claude Code", false, None::<&str>)?;
     let claude_desktop = MenuItem::with_id(app, "claude_desktop", "Ligar ao Claude Desktop", true, None::<&str>)?;
+    let claude_code = MenuItem::with_id(app, "claude_code", "Ligar ao Claude Code", true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
         "autostart",
@@ -298,7 +317,7 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
     let sep = || PredefinedMenuItem::separator(app);
     let menu = Menu::with_items(
         app,
-        &[&status, &sep()?, &toggle, &open, &copy_url, &copy_cmd, &claude_desktop, &sep()?, &autostart, &forget, &sep()?, &quit],
+        &[&status, &sep()?, &toggle, &open, &copy_url, &claude_desktop, &claude_code, &sep()?, &autostart, &forget, &sep()?, &quit],
     )?;
     let tray = TrayIconBuilder::with_id("main")
         .icon(icon_for(Look::Off))
@@ -307,7 +326,7 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .build(app)?;
-    Ok((Ui { tray, status, toggle, open, copy_url, copy_cmd }, menu))
+    Ok((Ui { tray, status, toggle, open, copy_url }, menu))
 }
 
 fn run_tray(config: Config) {

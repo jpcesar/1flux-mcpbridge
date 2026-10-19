@@ -38,14 +38,11 @@ Funciona com qualquer cliente MCP.
    descomprime e abre.
 2. Aparece um ícone no tray (Windows) ou na barra de menus (macOS). Dali: ligar e
    desligar (ON/OFF), ver o estado, abrir o 1fluxo e sair.
-3. No menu, **Copiar endereço MCP** ou **Copiar comando para o Claude Code**, e cola
-   no teu cliente:
-
-   ```bash
-   claude mcp add --transport http 1fluxo http://127.0.0.1:17350/mcp \
-     --header "Authorization: Bearer <o teu token>"
-   ```
-
+3. No menu, carrega em **Ligar ao Claude Desktop** e/ou **Ligar ao Claude Code**
+   (um clique cada; depois reinicia o Claude Desktop, ou abre uma sessão nova do
+   Claude Code). Para outros clientes MCP (Cursor, VS Code…), usa **Copiar endereço MCP**
+   e o token que o acompanha, por HTTP.
+   Move primeiro a app para a pasta Aplicações: o caminho fica guardado na configuração.
 4. Faz uma pergunta. Na primeira vez abre-se o browser para carregares em
    **Permitir**; a ligação mantém-se durante 30 dias.
 

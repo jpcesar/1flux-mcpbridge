@@ -22,7 +22,8 @@ Claude Desktop ── 1fluxo-bridge --stdio ───┤→ app de tray ──We
   deixa de ter acesso aos dados. O estado persiste entre reinícios.
 * **Estado**: desligado · ligado, à espera do 1fluxo · 1fluxo ligado (e o nome do cliente).
 * **Abrir o 1fluxo**: abre o `/connect` no browser (retoma o emparelhamento ou pede «Permitir»).
-* **Copiar endereço MCP** (com o token no caminho) e **copiar comando para o Claude Code**.
+* **Copiar endereço MCP** (com o token no caminho), para clientes HTTP.
+* **Ligar ao Claude Desktop** e **Ligar ao Claude Code**: um clique configura cada um (abaixo).
 * **Arrancar com o sistema** (ligado por defeito nos builds de release), **Esquecer emparelhamento**, **Sair**.
 
 Uma tool call sem tab ligado abre o browser sozinha (no máximo uma vez por
@@ -30,7 +31,13 @@ minuto) e espera até 60 s pelo tab, como o bridge em TypeScript.
 
 ## Ligar os clientes
 
-* **Claude Code, Cursor, VS Code**: copiar o comando/endereço no menu do tray. O token vai
+* **Claude Code** (CLI e separador Code do Claude Desktop, que partilham o `~/.claude.json`):
+  **Ligar ao Claude Code** corre `claude mcp add --scope user 1fluxo -- <esta app> --stdio`
+  (primeiro um `claude mcp remove` da mesma entrada, se existir). Não edita o `~/.claude.json`
+  à mão. Procura o `claude` nos sítios habituais e no `PATH` de um shell de login; se não o
+  encontrar, ou ele recusar, copia o comando para colar no terminal. Só vale para sessões novas.
+  Uma entrada `1fluxo` registada antes num projecto (âmbito local) continua a ter prioridade nesse projecto.
+* **Cursor, VS Code e outros clientes HTTP**: **Copiar endereço MCP**. O token vai
   no header `Authorization: Bearer …` (preferido) ou no caminho (`/mcp/<token>`), para os
   clientes que não deixam configurar headers — nesse caso fica em ficheiros de configuração e logs.
 * **Claude Desktop** (separador Chat): só lança processos por stdio e não aceita servidores
@@ -56,7 +63,7 @@ clientes poderem usar o mesmo bridge sem as respostas se trocarem.
 
 ```bash
 cd tray
-cargo test                       # 19 testes: emparelhamento, endpoint, remapeamento de ids, config do Claude Desktop
+cargo test                       # 22 testes: emparelhamento, endpoint, remapeamento de ids, config do Claude Desktop e do Claude Code
 cargo run -p bridge-core --bin 1fluxo-bridge-headless -- --app-url http://localhost:3000
 cargo run -p fluxo-bridge-app -- --app-url http://localhost:3000     # com tray
 scripts/pack-macos.sh            # dist/1fluxo-bridge-macos.zip (.app com assinatura ad-hoc)
