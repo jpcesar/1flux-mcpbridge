@@ -55,7 +55,8 @@ Uma app pequena que fica a correr e serve todos os clientes MCP do computador.
    encontrado, copia-se o comando para colares no terminal. A app tem de estar
    aberta para o assistente ter acesso aos dados.
 4. Faz uma pergunta. Na primeira vez abre-se o browser para carregares em
-   **Permitir**; a ligação mantém-se durante 30 dias.
+   **Permitir** (ou usa **Emparelhar** no menu para o fazer antes); a ligação
+   mantém-se durante 30 dias.
 
 **Primeira abertura.** Enquanto os executáveis não saem assinados (ver
 [Assinatura](#assinatura)), o macOS bloqueia-os: Definições do Sistema →
