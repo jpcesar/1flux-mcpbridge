@@ -1,6 +1,7 @@
 //! 1fluxo Bridge — app de tray (macOS e Windows). Um só executável:
 //!
-//! * sem argumentos: ícone no tray com ON/OFF, estado e o endereço MCP local;
+//! * sem argumentos: ícone no tray com Ligar/Desligar, Emparelhar, estado e o
+//!   endereço MCP local;
 //! * `--stdio`: shim para os clientes que só lançam processos (Claude Desktop),
 //!   reencaminha para o bridge que a app já tem a correr;
 //! * `--forget`: apaga o emparelhamento e termina.
@@ -67,10 +68,13 @@ fn write_app_state(dir: &Path, enabled: bool) {
 struct Ui {
     tray: TrayIcon<tauri::Wry>,
     status: MenuItem<tauri::Wry>,
-    toggle: CheckMenuItem<tauri::Wry>,
-    open: MenuItem<tauri::Wry>,
+    /// «Desligar» com o bridge ligado, «Ligar» com ele desligado.
+    toggle: MenuItem<tauri::Wry>,
+    /// «Esquecer emparelhamento» se houver um, «Emparelhar» se não houver.
+    pair: MenuItem<tauri::Wry>,
     copy_url: MenuItem<tauri::Wry>,
     copy_cmd: MenuItem<tauri::Wry>,
+    state_dir: PathBuf,
 }
 
 impl Ui {
@@ -88,14 +92,33 @@ impl Ui {
             ),
         };
         let _ = self.status.set_text(&text);
-        let _ = self.toggle.set_checked(s.running);
-        for item in [&self.open, &self.copy_url, &self.copy_cmd] {
+        let _ = self.toggle.set_text(if s.running { "Desligar" } else { "Ligar" });
+        // Esquecer funciona sempre (apaga o ficheiro); Emparelhar precisa do
+        // bridge ligado, porque é ele que abre a página /connect com o token.
+        if paired(s, &self.state_dir) {
+            let _ = self.pair.set_text("Esquecer emparelhamento");
+            let _ = self.pair.set_enabled(true);
+        } else {
+            let _ = self.pair.set_text("Emparelhar");
+            let _ = self.pair.set_enabled(s.running);
+        }
+        for item in [&self.copy_url, &self.copy_cmd] {
             let _ = item.set_enabled(s.running);
         }
         let _ = self.tray.set_icon(Some(icon_for(look)));
         #[cfg(target_os = "macos")]
         let _ = self.tray.set_icon_as_template(true);
         let _ = self.tray.set_tooltip(Some(format!("1fluxo Bridge — {text}")));
+    }
+}
+
+/// Há emparelhamento válido? Com o bridge ligado sabe-o o próprio bridge; com
+/// ele desligado, lê-se o ficheiro.
+fn paired(s: &Status, state_dir: &Path) -> bool {
+    if s.running {
+        s.paired
+    } else {
+        pairing::load(state_dir).is_some_and(|p| p.valid())
     }
 }
 
@@ -175,8 +198,19 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
                     start_bridge(&shared).await;
                 }
             }
-            "open" => {
-                if let Some(r) = shared.running.lock().await.as_ref() {
+            "pair" => {
+                let status = shared.running.lock().await.as_ref().map(|r| r.status().borrow().clone());
+                let status = status.unwrap_or_default();
+                if paired(&status, &shared.cfg.state_dir) {
+                    pairing::clear(&shared.cfg.state_dir);
+                    // Reinicia para o bridge largar o emparelhamento em memória.
+                    if status.running {
+                        stop_bridge(&shared, false).await;
+                        start_bridge(&shared).await;
+                    } else {
+                        shared.ui.show(&Status::default(), None);
+                    }
+                } else if let Some(r) = shared.running.lock().await.as_ref() {
                     r.hub.open_connect_page();
                 }
             }
@@ -199,14 +233,6 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
                 let enabled = launcher.is_enabled().unwrap_or(false);
                 let _ = if enabled { launcher.disable() } else { launcher.enable() };
             }
-            "forget" => {
-                pairing::clear(&shared.cfg.state_dir);
-                // Reinicia para o bridge largar o emparelhamento em memória.
-                if shared.running.lock().await.is_some() {
-                    stop_bridge(&shared, false).await;
-                    start_bridge(&shared).await;
-                }
-            }
             "quit" => {
                 stop_bridge(&shared, false).await;
                 app.exit(0);
@@ -216,10 +242,10 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
     });
 }
 
-fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)> {
+fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf) -> tauri::Result<(Ui, Menu<tauri::Wry>)> {
     let status = MenuItem::with_id(app, "status", "Desligado", false, None::<&str>)?;
-    let toggle = CheckMenuItem::with_id(app, "toggle", "Ligado", true, false, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", "Abrir o 1fluxo", false, None::<&str>)?;
+    let toggle = MenuItem::with_id(app, "toggle", "Ligar", true, None::<&str>)?;
+    let pair = MenuItem::with_id(app, "pair", "Emparelhar", false, None::<&str>)?;
     let copy_url = MenuItem::with_id(app, "copy_url", "Copiar endereço MCP", false, None::<&str>)?;
     let copy_cmd = MenuItem::with_id(app, "copy_cmd", "Copiar comando para o Claude Code", false, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
@@ -230,12 +256,11 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
         app.autolaunch().is_enabled().unwrap_or(false),
         None::<&str>,
     )?;
-    let forget = MenuItem::with_id(app, "forget", "Esquecer emparelhamento", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
     let menu = Menu::with_items(
         app,
-        &[&status, &sep()?, &toggle, &open, &copy_url, &copy_cmd, &sep()?, &autostart, &forget, &sep()?, &quit],
+        &[&status, &sep()?, &toggle, &pair, &copy_url, &copy_cmd, &sep()?, &autostart, &sep()?, &quit],
     )?;
     let tray = TrayIconBuilder::with_id("main")
         .icon(icon_for(Look::Off))
@@ -244,7 +269,10 @@ fn build_ui(app: &AppHandle<tauri::Wry>) -> tauri::Result<(Ui, Menu<tauri::Wry>)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .build(app)?;
-    Ok((Ui { tray, status, toggle, open, copy_url, copy_cmd }, menu))
+    let ui = Ui { tray, status, toggle, pair, copy_url, copy_cmd, state_dir };
+    // Estado inicial (desligado): o item do emparelhamento já lê o ficheiro.
+    ui.show(&Status::default(), None);
+    Ok((ui, menu))
 }
 
 fn run_tray(config: Config) {
@@ -264,7 +292,7 @@ fn run_tray(config: Config) {
             if first_run && !cfg!(debug_assertions) && std::env::var_os("FLUXO_BRIDGE_NO_AUTOSTART").is_none() {
                 let _ = app.autolaunch().enable();
             }
-            let (ui, _menu) = build_ui(app.handle())?;
+            let (ui, _menu) = build_ui(app.handle(), config.state_dir.clone())?;
             let shared = Arc::new(Shared { cfg: config, running: Mutex::new(None), ui });
 
             let (handle, s) = (app.handle().clone(), shared.clone());

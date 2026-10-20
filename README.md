@@ -37,7 +37,7 @@ Funciona com qualquer cliente MCP.
    `1fluxo-bridge-macos.zip` ou `1fluxo-bridge-windows.zip`. Não há instalador:
    descomprime e abre.
 2. Aparece um ícone no tray (Windows) ou na barra de menus (macOS). Dali: ligar e
-   desligar (ON/OFF), ver o estado, abrir o 1fluxo e sair.
+   desligar, ver o estado, emparelhar (ou esquecer o emparelhamento) e sair.
 3. No menu, **Copiar endereço MCP** ou **Copiar comando para o Claude Code**, e cola
    no teu cliente:
 
@@ -66,7 +66,7 @@ shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS / Linux
 O endpoint só aceita pedidos de `127.0.0.1`, exige um token, recusa qualquer pedido
 com `Origin` (um site a tentar a sorte) e valida o `Host` (DNS rebinding). Vários
 clientes podem usar o mesmo bridge: os ids dos pedidos são remapeados para as
-respostas não se trocarem. O botão **OFF** corta o acesso por completo.
+respostas não se trocarem. O item **Desligar** corta o acesso por completo.
 
 Encontraste uma vulnerabilidade? Vê o [SECURITY.md](SECURITY.md).
 

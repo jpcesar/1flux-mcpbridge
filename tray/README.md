@@ -18,12 +18,14 @@ Claude Desktop ── 1fluxo-bridge --stdio ───┤→ app de tray ──We
 
 ## O que faz o tray
 
-* **ON / OFF**: ON arranca o bridge e o endpoint; OFF fecha tudo e o assistente
-  deixa de ter acesso aos dados. O estado persiste entre reinícios.
+* **Ligar / Desligar**: Ligar arranca o bridge e o endpoint; Desligar fecha tudo e o
+  assistente deixa de ter acesso aos dados. O estado persiste entre reinícios.
 * **Estado**: desligado · ligado, à espera do 1fluxo · 1fluxo ligado (e o nome do cliente).
-* **Abrir o 1fluxo**: abre o `/connect` no browser (retoma o emparelhamento ou pede «Permitir»).
+* **Emparelhar / Esquecer emparelhamento**: sem emparelhamento, «Emparelhar» abre o
+  `/connect` no browser para carregar em «Permitir» (precisa do bridge ligado); com
+  emparelhamento, «Esquecer emparelhamento» apaga-o e obriga a autorizar de novo.
 * **Copiar endereço MCP** (com o token no caminho) e **copiar comando para o Claude Code**.
-* **Arrancar com o sistema** (ligado por defeito nos builds de release), **Esquecer emparelhamento**, **Sair**.
+* **Arrancar com o sistema** (ligado por defeito nos builds de release) e **Sair**.
 
 Uma tool call sem tab ligado abre o browser sozinha (no máximo uma vez por
 minuto) e espera até 60 s pelo tab, como o bridge em TypeScript.
