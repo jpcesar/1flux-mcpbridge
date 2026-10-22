@@ -6,11 +6,15 @@
 //! número interno único; quando a resposta volta repõe-se o original e entrega-se
 //! ao cliente certo. Os pedidos pendentes de um cliente que desaparece são
 //! limpos (guarda no `Drop`).
+//!
+//! Quem é cada cliente: o `initialize` abre uma sessão MCP (`Mcp-Session-Id`)
+//! com o `clientInfo`; cada pedido dessa sessão segue para o tab com o nome do
+//! cliente em `params._meta["1fluxo.com/client"]`, para o tab dizer quem pediu.
 
 use crate::{
     open,
     pairing::{self, Pairing},
-    proto::{self, error_response, ERR_NO_TAB, VERSION},
+    proto::{self, error_response, ClientInfo, ERR_NO_TAB, VERSION},
 };
 use serde_json::{json, Value};
 use std::{
@@ -41,6 +45,8 @@ const OPEN_COOLDOWN: Duration = Duration::from_secs(60);
 /// Um pedido sem tab espera isto; uma tool call espera mais, pelo «Permitir».
 const NO_TAB_WAIT: Duration = Duration::from_secs(10);
 const TOOL_CALL_WAIT: Duration = Duration::from_secs(60);
+/// Sessões MCP em memória; acima disto sai a usada há mais tempo.
+const MAX_SESSIONS: usize = 256;
 
 pub fn log(message: &str) {
     eprintln!("[1flux-bridge] {message}");
@@ -114,6 +120,11 @@ struct Pending {
     original_id: Value,
 }
 
+struct Session {
+    client: Option<ClientInfo>,
+    last_used: Instant,
+}
+
 struct Inner {
     tab: Option<TabHandle>,
     next_tab_id: u64,
@@ -124,7 +135,9 @@ struct Inner {
     pending_connections: usize,
     ws_port: u16,
     http_port: u16,
-    client: Option<(String, Option<String>)>,
+    /// O último cliente que se apresentou ou pediu algo: vai no `paired`.
+    client: Option<ClientInfo>,
+    sessions: HashMap<String, Session>,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     browser_opened_at: Option<Instant>,
@@ -201,6 +214,7 @@ impl Hub {
                 ws_port: 0,
                 http_port: 0,
                 client: None,
+                sessions: HashMap::new(),
                 next_id: 1,
                 pending: HashMap::new(),
                 browser_opened_at: None,
@@ -347,19 +361,53 @@ impl Hub {
         }
     }
 
-    /// Ponto de entrada de uma mensagem JSON-RPC vinda de um cliente MCP.
-    /// `None` quer dizer «sem resposta» (notificação).
-    pub async fn handle_rpc(&self, msg: Value) -> Option<Value> {
+    /* ── sessões MCP (quem é cada cliente) ───────────────────────────────── */
+
+    /// Abre uma sessão para um cliente que acabou de fazer `initialize`.
+    pub fn open_session(&self, client: Option<ClientInfo>) -> String {
+        let id = pairing::random_b64(24);
+        let mut g = self.lock();
+        if g.sessions.len() >= MAX_SESSIONS {
+            let oldest = g.sessions.iter().min_by_key(|(_, s)| s.last_used).map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                g.sessions.remove(&k);
+            }
+        }
+        g.sessions.insert(id.clone(), Session { client, last_used: Instant::now() });
+        id
+    }
+
+    /// O cliente de uma sessão; `None` se a sessão não existe (o bridge
+    /// reiniciou, ou o id é inventado) e o cliente tem de voltar a inicializar.
+    pub fn session_client(&self, id: &str) -> Option<Option<ClientInfo>> {
+        let mut g = self.lock();
+        let s = g.sessions.get_mut(id)?;
+        s.last_used = Instant::now();
+        Some(s.client.clone())
+    }
+
+    pub fn close_session(&self, id: &str) -> bool {
+        self.lock().sessions.remove(id).is_some()
+    }
+
+    /// Ponto de entrada de uma mensagem JSON-RPC vinda de um cliente MCP, com
+    /// o cliente que a mandou (se se souber). `None` quer dizer «sem resposta».
+    pub async fn handle_rpc(&self, mut msg: Value, client: Option<ClientInfo>) -> Option<Value> {
         let method = proto::method(&msg).map(str::to_owned);
         let id = proto::request_id(&msg);
 
-        if method.as_deref() == Some("initialize") {
-            if let Some(info) = proto::client_info(&msg) {
-                let mut g = self.lock();
-                g.client = Some(info);
-                let running = true;
-                self.publish(&g, running);
+        // O `initialize` traz o nome; nos outros pedidos vem da sessão.
+        let client = client.or_else(|| {
+            (method.as_deref() == Some("initialize")).then(|| proto::client_info(&msg)).flatten()
+        });
+        if let Some(c) = &client {
+            let mut g = self.lock();
+            if g.client.as_ref() != Some(c) {
+                g.client = Some(c.clone());
+                self.publish(&g, true);
             }
+            drop(g);
+            proto::with_client_meta(&mut msg, c);
         }
 
         let Some(id) = id else {

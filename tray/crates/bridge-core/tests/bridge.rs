@@ -323,3 +323,136 @@ async fn tab_que_fecha_a_meio_devolve_erro_legivel() {
     assert!(v["error"]["message"].as_str().unwrap().contains("fechou a ligação"));
     run.stop().await;
 }
+
+/* ── quem é cada cliente (sessões MCP e cabeçalho do shim) ──────────────── */
+
+/// Pedido HTTP cru, com cabeçalhos à escolha; devolve estado, cabeçalhos e corpo.
+async fn http(port: u16, method: &str, headers: &[(&str, &str)], body: &str) -> (u16, std::collections::HashMap<String, String>, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let extra: String = headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+    let req = format!(
+        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).await.unwrap();
+    let text = String::from_utf8(raw).unwrap();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap();
+    let mut lines = head.lines();
+    let status = lines.next().unwrap().split_whitespace().nth(1).unwrap().parse().unwrap();
+    let hdrs = lines
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    (status, hdrs, body.to_string())
+}
+
+fn init_body(name: &str) -> String {
+    json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":name,"version":"1"}}}).to_string()
+}
+
+fn call_body(id: u64, tool: &str) -> String {
+    json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":tool,"arguments":{}}}).to_string()
+}
+
+/// O tab de mentira responde a cada tool call com o nome do cliente que lhe chegou em `_meta`.
+async fn answer_with_client(tab: &mut Ws, n: usize) -> Vec<String> {
+    let mut seen = Vec::new();
+    while seen.len() < n {
+        if let Some(Ok(Message::Text(t))) = timeout(Duration::from_secs(5), tab.next()).await.unwrap() {
+            let v: Value = serde_json::from_str(t.as_str()).unwrap();
+            if v["method"] != "tools/call" {
+                continue;
+            }
+            let who = v["params"]["_meta"]["1fluxo.com/client"]["name"].as_str().unwrap_or("?").to_string();
+            assert_eq!(v["params"]["name"].as_str().unwrap().len() > 0, true, "params intactos");
+            let reply = json!({"jsonrpc":"2.0","id":v["id"],"result":{"content":[{"type":"text","text":who}]}});
+            tab.send(Message::text(reply.to_string())).await.unwrap();
+            seen.push(who);
+        }
+    }
+    seen
+}
+
+#[tokio::test]
+async fn cada_cliente_leva_o_seu_nome_ao_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = boot(dir.path()).await;
+    let i = info(&run);
+    let auth = format!("Bearer {}", i.endpoint_token);
+
+    // Dois clientes apresentam-se e recebem cada um a sua sessão.
+    let (s1, h1, _) = http(i.http_port, "POST", &[("Authorization", &auth)], &init_body("Claude Code")).await;
+    let (s2, h2, _) = http(i.http_port, "POST", &[("Authorization", &auth)], &init_body("Cursor")).await;
+    assert_eq!((s1, s2), (200, 200));
+    let (sa, sb) = (h1["mcp-session-id"].clone(), h2["mcp-session-id"].clone());
+    assert_ne!(sa, sb);
+
+    let (mut tab, r) = handshake(i.ws_port, json!({"type":"pair","token":i.token,"nonce":nonce()})).await;
+    // O `paired` leva o último que se apresentou.
+    assert_eq!(message(r)["client"]["name"], "Cursor");
+
+    let port = i.http_port;
+    let (auth_a, auth_b) = (auth.clone(), auth.clone());
+    let a = tokio::spawn(async move { http(port, "POST", &[("Authorization", &auth_a), ("Mcp-Session-Id", &sa)], &call_body(1, "list_months")).await });
+    let b = tokio::spawn(async move { http(port, "POST", &[("Authorization", &auth_b), ("Mcp-Session-Id", &sb)], &call_body(1, "list_accounts")).await });
+    let mut seen = answer_with_client(&mut tab, 2).await;
+    seen.sort();
+    assert_eq!(seen, vec!["Claude Code", "Cursor"]);
+
+    let (_, _, ba) = a.await.unwrap();
+    let (_, _, bb) = b.await.unwrap();
+    let ra: Value = serde_json::from_str(&ba).unwrap();
+    let rb: Value = serde_json::from_str(&bb).unwrap();
+    assert_eq!(ra["result"]["content"][0]["text"], "Claude Code");
+    assert_eq!(rb["result"]["content"][0]["text"], "Cursor");
+    assert_eq!((ra["id"].clone(), rb["id"].clone()), (json!(1), json!(1)));
+    run.stop().await;
+}
+
+#[tokio::test]
+async fn cabecalho_do_shim_identifica_o_cliente_sem_sessao() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = boot(dir.path()).await;
+    let i = info(&run);
+    let (mut tab, r) = handshake(i.ws_port, json!({"type":"pair","token":i.token,"nonce":nonce()})).await;
+    message(r);
+    let header = bridge_core::proto::encode_client_header(&("Claude Desktop".into(), Some("0.13".into())));
+    let (port, auth) = (i.http_port, format!("Bearer {}", i.endpoint_token));
+    let call = tokio::spawn(async move { http(port, "POST", &[("Authorization", &auth), ("X-1fluxo-Client", &header)], &call_body(5, "list_months")).await });
+    assert_eq!(answer_with_client(&mut tab, 1).await, vec!["Claude Desktop"]);
+    let (status, _, body) = call.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["result"]["content"][0]["text"], "Claude Desktop");
+    run.stop().await;
+}
+
+#[tokio::test]
+async fn sessao_desconhecida_da_404_e_delete_fecha_a_sessao() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = boot(dir.path()).await;
+    let i = info(&run);
+    let auth = format!("Bearer {}", i.endpoint_token);
+    let ping = json!({"jsonrpc":"2.0","id":2,"method":"ping"}).to_string();
+
+    let (status, _, _) = http(i.http_port, "POST", &[("Authorization", &auth), ("Mcp-Session-Id", "inventada")], &ping).await;
+    assert_eq!(status, 404);
+
+    let (_, h, _) = http(i.http_port, "POST", &[("Authorization", &auth)], &init_body("teste")).await;
+    let sid = h["mcp-session-id"].clone();
+    let (status, _, _) = http(i.http_port, "POST", &[("Authorization", &auth), ("Mcp-Session-Id", &sid)], &ping).await;
+    assert_eq!(status, 200);
+    // Sem token não se fecha nada.
+    let (status, _, _) = http(i.http_port, "DELETE", &[("Mcp-Session-Id", &sid)], "").await;
+    assert_eq!(status, 401);
+    let (status, _, _) = http(i.http_port, "DELETE", &[("Authorization", &auth), ("Mcp-Session-Id", &sid)], "").await;
+    assert_eq!(status, 200);
+    let (status, _, _) = http(i.http_port, "POST", &[("Authorization", &auth), ("Mcp-Session-Id", &sid)], &ping).await;
+    assert_eq!(status, 404);
+    // Sem sessão continua a funcionar (clientes que não as usam).
+    let (status, _, _) = http(i.http_port, "POST", &[("Authorization", &auth)], &ping).await;
+    assert_eq!(status, 200);
+    run.stop().await;
+}

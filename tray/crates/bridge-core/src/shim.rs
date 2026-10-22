@@ -6,6 +6,10 @@
 //! Se o tray não estiver a correr, `initialize`, `ping` e `tools/list`
 //! respondem-se aqui (senão o cliente dava o servidor como morto ao arrancar)
 //! e o resto falha com um erro legível a pedir para abrir a app.
+//!
+//! O shim guarda o `clientInfo` do `initialize` e manda-o em cada pedido no
+//! cabeçalho `X-1fluxo-Client`, para o bridge dizer ao tab quem pediu (sem
+//! depender de sessões, que se perdem quando o tray reinicia).
 
 use crate::{
     pairing::ENDPOINT_FILE,
@@ -13,7 +17,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -40,9 +47,15 @@ pub fn read_endpoint_info(dir: &Path) -> Option<EndpointInfo> {
 
 /// `POST /mcp` mínimo sobre TCP, sem dependências: é loopback, uma ligação por pedido.
 pub async fn post_json(port: u16, token: &str, body: &str) -> std::io::Result<(u16, String)> {
+    post_json_with(port, token, body, &[]).await
+}
+
+/// Como `post_json`, com cabeçalhos extra (o cliente, para o shim).
+pub async fn post_json_with(port: u16, token: &str, body: &str, extra: &[(&str, &str)]) -> std::io::Result<(u16, String)> {
     let mut s = TcpStream::connect(("127.0.0.1", port)).await?;
+    let extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
     let req = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nAccept: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).await?;
@@ -90,15 +103,23 @@ pub async fn run_stdio(state_dir: &Path) -> anyhow::Result<()> {
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let dir = state_dir.to_path_buf();
+    // O cliente apresenta-se no `initialize`; guarda-se antes de o pedido seguir.
+    let client: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     while let Some(line) = lines.next_line().await? {
         let line = line.trim().to_string();
         if line.is_empty() {
             continue;
         }
         let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        if proto::method(&msg) == Some("initialize") {
+            if let Some(info) = proto::client_info(&msg) {
+                *client.lock().unwrap_or_else(|e| e.into_inner()) = Some(proto::encode_client_header(&info));
+            }
+        }
+        let header = client.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let (dir, tx) = (dir.clone(), out_tx.clone());
         tokio::spawn(async move {
-            if let Some(resp) = forward(&dir, &line, &msg).await {
+            if let Some(resp) = forward(&dir, &line, &msg, header.as_deref()).await {
                 let _ = tx.send(resp);
             }
         });
@@ -108,10 +129,11 @@ pub async fn run_stdio(state_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn forward(dir: &Path, line: &str, msg: &Value) -> Option<String> {
+async fn forward(dir: &Path, line: &str, msg: &Value, client: Option<&str>) -> Option<String> {
     let id = proto::request_id(msg);
     if let Some(info) = read_endpoint_info(dir) {
-        if let Ok((status, body)) = post_json(info.port, &info.token, line).await {
+        let extra: Vec<(&str, &str)> = client.map(|c| (crate::http::CLIENT_HEADER, c)).into_iter().collect();
+        if let Ok((status, body)) = post_json_with(info.port, &info.token, line, &extra).await {
             return match status {
                 200 if !body.trim().is_empty() => Some(body.trim().to_string()),
                 200 | 202 => None,
