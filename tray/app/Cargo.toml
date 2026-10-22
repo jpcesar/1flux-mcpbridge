@@ -1,6 +1,6 @@
 [package]
 name = "fluxo-bridge-app"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 description = "App de tray do bridge 1fluxo: ON/OFF, estado e endereço MCP local."
 license = "FSL-1.1-MIT"

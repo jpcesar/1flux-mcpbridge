@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "bridge-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -889,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "fluxo-bridge-app"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bridge-core",
  "serde_json",
