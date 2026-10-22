@@ -27,6 +27,8 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
 
 const APP_STATE_FILE: &str = "bridge-app.json";
+/// «1fluxo Bridge 1.0.3»: no fundo do menu e no tooltip do ícone.
+const APP_TITLE: &str = concat!("1fluxo Bridge ", env!("CARGO_PKG_VERSION"));
 
 /* ── ícones ─────────────────────────────────────────────────────────────── */
 
@@ -105,7 +107,7 @@ impl Ui {
         let _ = self.tray.set_icon(Some(icon_for(look)));
         #[cfg(target_os = "macos")]
         let _ = self.tray.set_icon_as_template(true);
-        let _ = self.tray.set_tooltip(Some(format!("1fluxo Bridge — {text}")));
+        let _ = self.tray.set_tooltip(Some(format!("{APP_TITLE} — {text}")));
     }
 }
 
@@ -340,16 +342,17 @@ fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf) -> tauri::Result<(U
         app.autolaunch().is_enabled().unwrap_or(false),
         None::<&str>,
     )?;
+    let version = MenuItem::with_id(app, "version", APP_TITLE, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
     let menu = Menu::with_items(
         app,
-        &[&status, &sep()?, &toggle, &pair, &copy_url, &claude_desktop, &claude_code, &sep()?, &autostart, &sep()?, &quit],
+        &[&status, &sep()?, &toggle, &pair, &copy_url, &claude_desktop, &claude_code, &sep()?, &autostart, &sep()?, &version, &quit],
     )?;
     let tray = TrayIconBuilder::with_id("main")
         .icon(icon_for(Look::Off))
         .icon_as_template(cfg!(target_os = "macos"))
-        .tooltip("1fluxo Bridge")
+        .tooltip(APP_TITLE)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .build(app)?;
