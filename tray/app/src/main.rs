@@ -15,7 +15,11 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 use tauri::{
     image::Image,
@@ -23,8 +27,10 @@ use tauri::{
     tray::{TrayIcon, TrayIconBuilder},
     AppHandle, Manager, RunEvent,
 };
-use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
+
+mod install_location;
+mod login_item;
 
 const APP_STATE_FILE: &str = "bridge-app.json";
 /// «1fluxo Bridge 1.0.3»: no fundo do menu e no tooltip do ícone.
@@ -75,6 +81,14 @@ struct Ui {
     /// «Esquecer emparelhamento» se houver um, «Emparelhar» se não houver.
     pair: MenuItem<tauri::Wry>,
     copy_url: MenuItem<tauri::Wry>,
+    /// «Arrancar com o sistema»: o visto segue o estado real do item de início.
+    autostart: CheckMenuItem<tauri::Wry>,
+    /// «Aprovar nas Definições…»: só está no menu enquanto o sistema o pede.
+    approve: MenuItem<tauri::Wry>,
+    approve_shown: Arc<AtomicBool>,
+    menu: Menu<tauri::Wry>,
+    /// A app está em Aplicações (ou em desenvolvimento): só então pode registar-se.
+    in_place: bool,
     state_dir: PathBuf,
 }
 
@@ -108,6 +122,38 @@ impl Ui {
         #[cfg(target_os = "macos")]
         let _ = self.tray.set_icon_as_template(true);
         let _ = self.tray.set_tooltip(Some(format!("{APP_TITLE} — {text}")));
+    }
+}
+
+impl Ui {
+    /// Põe o item de início a refletir o estado do sistema e mostra ou esconde o
+    /// «Aprovar nas Definições…».
+    fn show_login_item(&self, state: login_item::State) {
+        let _ = self.autostart.set_checked(state.checked());
+        let _ = self.autostart.set_enabled(self.in_place);
+        let _ = self.autostart.set_text(if self.in_place {
+            "Arrancar com o sistema"
+        } else {
+            "Arrancar com o sistema (move a app para Aplicações)"
+        });
+        let want = self.in_place && state.needs_approval();
+        if want == self.approve_shown.load(Ordering::SeqCst) {
+            return;
+        }
+        if want {
+            let at = self
+                .menu
+                .items()
+                .ok()
+                .and_then(|items| items.iter().position(|i| i.id() == self.autostart.id()));
+            if let Some(at) = at {
+                if self.menu.insert(&self.approve, at + 1).is_ok() {
+                    self.approve_shown.store(true, Ordering::SeqCst);
+                }
+            }
+        } else if self.menu.remove(&self.approve).is_ok() {
+            self.approve_shown.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -314,10 +360,21 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
                 let _ = tauri::async_runtime::spawn_blocking(connect_claude_desktop).await;
             }
             "autostart" => {
-                let launcher = app.autolaunch();
-                let enabled = launcher.is_enabled().unwrap_or(false);
-                let _ = if enabled { launcher.disable() } else { launcher.enable() };
+                let result = match login_item::click_action(login_item::state(&app)) {
+                    login_item::Click::Register => login_item::set_enabled(&app, true),
+                    login_item::Click::Unregister => login_item::set_enabled(&app, false),
+                    login_item::Click::OpenSettings => {
+                        login_item::open_settings();
+                        Ok(())
+                    }
+                };
+                if let Err(e) = result {
+                    notify(&format!("Não consegui mudar o arranque com o sistema: {e}"));
+                }
+                // O menu alterna o visto sozinho; volta a pô-lo como o sistema diz.
+                shared.ui.show_login_item(login_item::state(&app));
             }
+            "approve_login" => login_item::open_settings(),
             "quit" => {
                 stop_bridge(&shared, false).await;
                 app.exit(0);
@@ -327,7 +384,7 @@ fn handle_menu(app: &AppHandle<tauri::Wry>, shared: &Arc<Shared>, id: &str) {
     });
 }
 
-fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf) -> tauri::Result<(Ui, Menu<tauri::Wry>)> {
+fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf, in_place: bool) -> tauri::Result<(Ui, Menu<tauri::Wry>)> {
     let status = MenuItem::with_id(app, "status", "Desligado", false, None::<&str>)?;
     let toggle = MenuItem::with_id(app, "toggle", "Ligar", true, None::<&str>)?;
     let pair = MenuItem::with_id(app, "pair", "Emparelhar", false, None::<&str>)?;
@@ -338,10 +395,11 @@ fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf) -> tauri::Result<(U
         app,
         "autostart",
         "Arrancar com o sistema",
-        true,
-        app.autolaunch().is_enabled().unwrap_or(false),
+        in_place,
+        login_item::state(app).checked(),
         None::<&str>,
     )?;
+    let approve = MenuItem::with_id(app, "approve_login", "Aprovar nas Definições…", true, None::<&str>)?;
     let version = MenuItem::with_id(app, "version", APP_TITLE, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
@@ -356,30 +414,76 @@ fn build_ui(app: &AppHandle<tauri::Wry>, state_dir: PathBuf) -> tauri::Result<(U
         .menu(&menu)
         .show_menu_on_left_click(true)
         .build(app)?;
-    let ui = Ui { tray, status, toggle, pair, copy_url, state_dir };
+    let ui = Ui {
+        tray,
+        status,
+        toggle,
+        pair,
+        copy_url,
+        autostart,
+        approve,
+        approve_shown: Arc::new(AtomicBool::new(false)),
+        menu: menu.clone(),
+        in_place,
+        state_dir,
+    };
     // Estado inicial (desligado): o item do emparelhamento já lê o ficheiro.
     ui.show(&Status::default(), None);
+    ui.show_login_item(login_item::state(app));
     Ok((ui, menu))
 }
 
 fn run_tray(config: Config) {
     let state_dir: PathBuf = config.state_dir.clone();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+
+    // Fora de Aplicações (DMG, Descarregamentos), oferece-se mover antes de mais:
+    // o item de início ficaria a apontar para o sítio errado. Nada se escreve no
+    // estado antes disto, para a instância relançada ainda ver a primeira execução.
+    #[cfg(target_os = "macos")]
+    let placement = install_location::offer_move(&state_dir, home.as_deref());
+    #[cfg(not(target_os = "macos"))]
+    let placement = install_location::Placement::Settled;
+    if placement == install_location::Placement::Relaunched {
+        return;
+    }
+    let in_place = placement == install_location::Placement::Settled;
+
     let first_run = read_app_state(&state_dir).is_none();
     // Por defeito ligado; depois de um OFF deliberado, fica desligado após reiniciar.
     let enabled = read_app_state(&state_dir).unwrap_or(true);
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+    let builder = tauri::Builder::default();
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None));
+    let app = builder
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Arranque com o sistema ligado por defeito. Só
-            // em builds de release, e `FLUXO_BRIDGE_NO_AUTOSTART=1` desliga-o (testes).
-            if first_run && !cfg!(debug_assertions) && std::env::var_os("FLUXO_BRIDGE_NO_AUTOSTART").is_none() {
-                let _ = app.autolaunch().enable();
+            // Arranque com o sistema ligado por defeito na primeira execução, só em
+            // builds de release e com a app no sítio certo; `FLUXO_BRIDGE_NO_AUTOSTART=1`
+            // desliga-o (testes). Quem tinha o LaunchAgent das versões anteriores
+            // passa para o item novo (sem ficar com dois).
+            if in_place && !cfg!(debug_assertions) && std::env::var_os("FLUXO_BRIDGE_NO_AUTOSTART").is_none() {
+                let migrated = cfg!(target_os = "macos") && home.as_deref().is_some_and(login_item::remove_legacy_agent);
+                if first_run || migrated {
+                    if let Err(e) = login_item::set_enabled(app.handle(), true) {
+                        log(&format!("Não consegui registar o arranque com o sistema: {e}"));
+                    }
+                }
             }
-            let (ui, _menu) = build_ui(app.handle(), config.state_dir.clone())?;
+            let (ui, _menu) = build_ui(app.handle(), config.state_dir.clone(), in_place)?;
+
+            // O utilizador também mexe no item nas Definições do Sistema: relê-se o
+            // estado de tempos a tempos (e é assim que o «Aprovar…» desaparece depois de aprovado).
+            let (poll_ui, poll_app) = (ui.clone(), app.handle().clone());
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    poll_ui.show_login_item(login_item::state(&poll_app));
+                }
+            });
             let shared = Arc::new(Shared { cfg: config, running: Mutex::new(None), ui });
 
             let (handle, s) = (app.handle().clone(), shared.clone());

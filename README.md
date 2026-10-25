@@ -35,11 +35,14 @@ no 1fluxo e abre o ficheiro com o Claude Desktop. Funciona sozinha, sem a app da
 Uma app pequena que fica a correr e serve todos os clientes MCP do computador.
 
 1. Descarrega o ficheiro da tua plataforma em [Releases](../../releases/latest):
-   `1fluxo-bridge-macos.zip` ou `1fluxo-bridge-windows.zip`. Não há instalador:
-   descomprime e abre. No macOS, move primeiro a app para a pasta Aplicações (o
-   caminho dela fica guardado na configuração dos clientes).
+   `1fluxo-bridge-macos.dmg` (macOS 13 ou mais recente; também há um `.zip`) ou
+   `1fluxo-bridge-windows.zip`. No macOS, abre o DMG e arrasta a app para
+   Aplicações (o caminho dela fica guardado na configuração dos clientes). Se a
+   abrires de outro sítio, a própria app oferece-se para se mover para lá. No
+   Windows não há instalador: descomprime e abre.
 2. Aparece um ícone no tray (Windows) ou na barra de menus (macOS). Dali: ligar e
-   desligar, ver o estado, emparelhar (ou esquecer o emparelhamento) e sair.
+   desligar, ver o estado, emparelhar (ou esquecer o emparelhamento), escolher se
+   arranca com o sistema e sair.
 3. Liga o teu cliente com um clique no menu:
 
    | Cliente | Item do menu | Depois |
@@ -109,13 +112,22 @@ Actions). Sem eles a release sai com assinatura ad-hoc e um aviso no workflow.
 | `APPLE_API_KEY_ID` | O *Key ID* dessa chave |
 | `APPLE_API_ISSUER_ID` | O *Issuer ID* da equipa |
 
-O `tray/scripts/pack-macos.sh` assina com hardened runtime e timestamp, envia o
-zip ao `notarytool`, agrafa o ticket à app e volta a fazer o zip. Para confirmar
-uma app descarregada:
+O `tray/scripts/pack-macos.sh` assina a app com hardened runtime e timestamp,
+envia o zip ao `notarytool`, agrafa o ticket à app e volta a fazer o zip. Depois
+constrói o `1fluxo-bridge-macos.dmg` (a app, o atalho para Aplicações e o fundo com
+a seta) com essa app já agrafada, assina-o com a mesma identidade, notariza-o
+(`notarytool --wait`, e só segue com `Accepted`) e agrafa-lhe o ticket. São duas
+notarizações por release. O zip mantém-se como alternativa. Sem segredos, o DMG
+sai na mesma, mas sem assinar. Para confirmar o que descarregaste:
 
 ```bash
-spctl --assess --type execute --verbose=2 "1fluxo Bridge.app"   # accepted, source=Notarized Developer ID
+spctl --assess --type open --context context:primary-signature -v 1fluxo-bridge-macos.dmg   # accepted, source=Notarized Developer ID
+spctl --assess --type execute -v "1fluxo Bridge.app"                                       # accepted, source=Notarized Developer ID
 ```
+
+A release junta o `.dmg` ao `SHA256SUMS` e aos atestados de origem, tal como o zip.
+O aspecto da janela do DMG vem de `tray/icons/dmg.DS_Store` (ver o
+[`tray/README.md`](tray/README.md)).
 
 A assinatura do executável de Windows ainda não está feita.
 

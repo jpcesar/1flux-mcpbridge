@@ -1,7 +1,7 @@
 name: release
 
 # Ao criar uma tag `vX.Y.Z` compila a app de tray em macOS e Windows, junta os
-# pacotes e o SHA256SUMS numa Release e atesta a origem dos ficheiros (quem os
+# pacotes (DMG e zip no macOS, zip no Windows) e o SHA256SUMS numa Release e atesta a origem dos ficheiros (quem os
 # descarrega pode confirmar que saíram deste repo e deste workflow).
 on:
   push:
@@ -76,10 +76,15 @@ jobs:
           cargo build --release -p fluxo-bridge-app
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Force -Path target/release/1fluxo-bridge.exe -DestinationPath dist/1fluxo-bridge-windows.zip
+      - name: Verificar o DMG
+        if: runner.os == 'macOS'
+        run: scripts/check-dmg.sh
       - uses: actions/upload-artifact@v4
         with:
           name: pacote-${{ runner.os }}
-          path: tray/dist/*.zip
+          path: |
+            tray/dist/*.zip
+            tray/dist/*.dmg
           if-no-files-found: error
 
   publish:
@@ -92,15 +97,17 @@ jobs:
           merge-multiple: true
       - name: SHA256SUMS
         working-directory: dist
-        run: sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+        run: sha256sum *.zip *.dmg > SHA256SUMS && cat SHA256SUMS
       # Os atestados só funcionam em repos públicos (ou no GitHub Enterprise).
       - uses: actions/attest-build-provenance@v2
         if: ${{ !github.event.repository.private }}
         with:
-          subject-path: dist/*.zip
+          subject-path: |
+            dist/*.zip
+            dist/*.dmg
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.dmg dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

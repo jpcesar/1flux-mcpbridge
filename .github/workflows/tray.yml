@@ -37,8 +37,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Force -Path target/release/1fluxo-bridge.exe -DestinationPath dist/1fluxo-bridge-windows.zip
+      - name: Verificar o DMG
+        if: runner.os == 'macOS'
+        run: scripts/check-dmg.sh
       - uses: actions/upload-artifact@v4
         with:
           name: 1fluxo-bridge-${{ runner.os }}
-          path: tray/dist/*.zip
+          path: |
+            tray/dist/*.zip
+            tray/dist/*.dmg
           if-no-files-found: error

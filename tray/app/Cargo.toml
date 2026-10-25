@@ -1,6 +1,6 @@
 [package]
 name = "fluxo-bridge-app"
-version = "1.0.5"
+version = "1.1.0"
 edition = "2021"
 description = "App de tray do bridge 1fluxo: ON/OFF, estado e endereço MCP local."
 license = "FSL-1.1-MIT"
@@ -17,5 +17,11 @@ tauri-build = { version = "2", features = [] }
 bridge-core = { path = "../crates/bridge-core" }
 serde_json = "1"
 tauri = { version = "2", default-features = false, features = ["wry", "tray-icon", "image-png", "compression"] }
-tauri-plugin-autostart = "2"
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util"] }
+
+# macOS 13+: item de início pelo SMAppService. No Windows continua o plugin (chave Run).
+[target.'cfg(target_os = "macos")'.dependencies]
+smappservice-rs = "0.1"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-autostart = "2"

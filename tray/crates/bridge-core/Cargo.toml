@@ -1,6 +1,6 @@
 [package]
 name = "bridge-core"
-version = "1.0.5"
+version = "1.1.0"
 edition = "2021"
 description = "Bridge local entre clientes MCP (HTTP ou stdio) e o 1fluxo aberto no browser (WebSocket)."
 license = "FSL-1.1-MIT"

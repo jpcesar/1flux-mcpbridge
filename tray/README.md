@@ -1,7 +1,7 @@
 # 1fluxo Bridge (tray)
 
-Utilitário de tray / barra de menus para macOS e Windows. Sem
-instalador, sem notarização, sem certificados: descarrega-se e corre-se.
+Utilitário de tray / barra de menus para macOS (13 ou mais recente) e Windows. No macOS
+descarrega-se o DMG e arrasta-se a app para Aplicações; no Windows descomprime-se o zip e corre-se.
 
 É o mesmo bridge do resto do repo (`src/index.ts`), reescrito em Rust e
 transformado num serviço local permanente. Em vez de cada cliente MCP lançar o
@@ -26,10 +26,30 @@ Claude Desktop ── 1fluxo-bridge --stdio ───┤→ app de tray ──We
   emparelhamento, «Esquecer emparelhamento» apaga-o e obriga a autorizar de novo.
 * **Copiar endereço MCP** (com o token no caminho), para clientes HTTP.
 * **Ligar ao Claude Desktop** e **Ligar ao Claude Code**: um clique configura cada um (abaixo).
-* **Arrancar com o sistema** (ligado por defeito nos builds de release) e **Sair**.
+* **Arrancar com o sistema** (ligado por defeito nos builds de release; ver abaixo) e **Sair**.
 
 Uma tool call sem tab ligado abre o browser sozinha (no máximo uma vez por
 minuto) e espera até 60 s pelo tab, como o bridge em TypeScript.
+
+## Instalar no macOS e arrancar com o sistema
+
+* **DMG**: `1fluxo-bridge-macos.dmg` abre uma janela com a app à esquerda, o atalho de
+  Aplicações à direita e uma seta; arrasta-se a app. O zip continua a existir como alternativa.
+* **Mover para Aplicações**: se a app abrir fora de `/Applications` e `~/Applications` (de dentro
+  do DMG, ou de Descarregamentos, onde o macOS a corre de uma pasta temporária «AppTranslocation»),
+  pergunta se a queres mover. Se aceitares, copia-a para Aplicações (ou `~/Applications`, se não
+  houver permissão), substitui a versão que lá estiver, abre-a de lá e fecha-se. Com «Agora não»
+  a app corre, mas **não** se regista para arrancar com o sistema (apontaria para o sítio errado); a
+  recusa fica guardada por caminho (`move-declined.json` na pasta de estado) e volta a perguntar
+  se a app aparecer noutro sítio. Fora de um bundle (`cargo run`) não pergunta nada.
+* **Item de início** (macOS 13+): usa o `SMAppService` e aparece em Definições do Sistema → Geral →
+  Itens de início. O visto de «Arrancar com o sistema» segue o estado real (relido de 5 em 5
+  segundos, por isso também apanha o que mudares nas Definições). Se o sistema pedir aprovação (por
+  exemplo, se o desligaste lá), aparece **Aprovar nas Definições…**, que abre essa página; enquanto
+  não aprovares o item fica sem visto.
+* **Migração**: as versões até à 1.0.x registavam um LaunchAgent em
+  `~/Library/LaunchAgents/1fluxo Bridge.plist`. Na primeira abertura da 1.1 apaga-se esse ficheiro
+  (só se for nosso) e, se o arranque estava ligado, regista-se o item novo, para não ficares com dois.
 
 ## Ligar os clientes
 
@@ -65,10 +85,11 @@ clientes poderem usar o mesmo bridge sem as respostas se trocarem.
 
 ```bash
 cd tray
-cargo test                       # 22 testes: emparelhamento, endpoint, remapeamento de ids, config do Claude Desktop e do Claude Code
+cargo test --workspace           # emparelhamento, endpoint, remapeamento de ids, config do Claude Desktop e do Claude Code, item de início e mover para Aplicações
 cargo run -p bridge-core --bin 1fluxo-bridge-headless -- --app-url http://localhost:3000
 cargo run -p fluxo-bridge-app -- --app-url http://localhost:3000     # com tray
-scripts/pack-macos.sh            # dist/1fluxo-bridge-macos.zip (.app com assinatura ad-hoc)
+scripts/pack-macos.sh            # dist/1fluxo-bridge-macos.dmg e .zip (.app com assinatura ad-hoc, DMG sem assinar)
+scripts/check-dmg.sh             # confirma que o DMG monta e tem a app, o atalho, o fundo e o layout
 ```
 
 Argumentos (comuns): `--port`, `--http-port` (defeito 17350, tem de ser estável),
@@ -76,11 +97,20 @@ Argumentos (comuns): `--port`, `--http-port` (defeito 17350, tem de ser estável
 `--stdio`, `--forget`. `FLUXO_BRIDGE_NO_AUTOSTART=1` impede o registo do arranque com o
 sistema no primeiro arranque de um build de release.
 
+**Janela do DMG.** O fundo (com a seta) sai de `icons/render-dmg.py` (`dmg-background.png` e
+`@2x`, juntos num TIFF pelo `pack-macos.sh`). O Finder precisa de um `.DS_Store` com o tamanho da
+janela e a posição dos ícones: `icons/dmg.DS_Store` é um modelo gerado por `scripts/dmg-layout.sh`
+(corre-se à mão, numa sessão gráfica, quando mudar o fundo ou as posições) e commitado, para o CI
+não depender do Finder. O nome do volume («1fluxo Bridge») e o caminho `.background/background.tiff`
+têm de coincidir nos dois scripts.
+
 Os ícones derivam do ícone da app pós-redesign (`1flux-app/src/app/icon.png`);
 `icons/render.py` regenera os PNG do tray (modelos monocromáticos para o macOS, cores
 da marca para o Windows).
 
 ## Primeira abertura (sem assinatura)
+
+Só vale para builds sem Developer ID (locais, ou uma release feita sem os segredos de assinatura).
 
 * **macOS**: o Gatekeeper bloqueia a app descarregada; abrir com botão direito → Abrir, ou
   Definições do Sistema → Privacidade e segurança → «Abrir mesmo assim».
